@@ -1,0 +1,66 @@
+======================================================================
+RESUMEN EJECUTIVO - MODELO DE PREDICCIÓN DE VENTAS
+======================================================================
+
+MODELO UTILIZADO: Random Forest Tuned
+
+1. MÉTRICAS GENERALES DE DESEMPEÑO:
+   • Precisión (R²):                     0.1549
+   • Error Absoluto Promedio (MAE):     $12.01
+   • Raíz del Error Cuadrático (RMSE):  $16.16
+   • Error Porcentual Promedio (MAPE):  2.36%
+
+2. DATOS PROCESADOS:
+   • Total de registros analizados:      6,136
+   • Períodos de tiempo:                 2022-05-01 a 2022-12-01
+   • Número de productos únicos:         942
+   • Segmentación (clusters):            3
+
+3. ANÁLISIS POR CLUSTER:
+
+   CLUSTER 0:
+   • Cantidad de productos:              4,853
+   • Ventas promedio actual:             $11.75
+   • Ventas predichas promedio:          $14.36
+   • Variación esperada:                 +22.25%
+   • Error promedio de predicción:       205.04%
+
+   CLUSTER 1:
+   • Cantidad de productos:              1,268
+   • Ventas promedio actual:             $89.35
+   • Ventas predichas promedio:          $20.50
+   • Variación esperada:                 -77.06%
+   • Error promedio de predicción:       166.62%
+
+   CLUSTER 2:
+   • Cantidad de productos:              15
+   • Ventas promedio actual:             $406.93
+   • Ventas predichas promedio:          $47.44
+   • Variación esperada:                 -88.34%
+   • Error promedio de predicción:       30.71%
+
+
+4. PRINCIPALES VARIABLES PREDICTORAS:
+
+   • ventas_min_6m                  0.1490
+   • ventas_mean_12m                0.1347
+   • ventas_lag1                    0.0615
+   • ventas_lag9                    0.0501
+   • ventas_lag3                    0.0402
+
+5. RECOMENDACIONES:
+   • El modelo tiene un R² de 0.1549, indicando aceptable precisión.
+   • El MAPE de 2.36% indica un excelente margen de error.
+   • Se recomienda usar estas predicciones para planificación de inventario y recursos.
+   • Monitorear continuamente el error de predicción para mejoras futuras.
+
+6. ARCHIVOS GENERADOS:
+   • PREDICCIONES_DETALLADAS.csv    → Predicciones completas con errores
+   • TOP_10_PREDICCIONES.csv         → Los 10 productos con mayores ventas predichas
+   • grafico_prediccion.png          → Gráfico Real vs Predicción
+   • grafico_clusters.png            → Visualización de clusters
+   • grafico_importancia.png         → Importancia de variables
+
+======================================================================
+Reporte generado: 2026-04-24 22:08:00
+======================================================================
