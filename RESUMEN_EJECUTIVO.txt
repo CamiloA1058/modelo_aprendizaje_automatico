@@ -1,3 +1,4 @@
+
 ======================================================================
 RESUMEN EJECUTIVO - MODELO DE PREDICCIÓN DE VENTAS
 ======================================================================
@@ -5,10 +6,10 @@ RESUMEN EJECUTIVO - MODELO DE PREDICCIÓN DE VENTAS
 MODELO UTILIZADO: Random Forest Tuned
 
 1. MÉTRICAS GENERALES DE DESEMPEÑO:
-   • Precisión (R²):                     0.1549
-   • Error Absoluto Promedio (MAE):     $12.01
-   • Raíz del Error Cuadrático (RMSE):  $16.16
-   • Error Porcentual Promedio (MAPE):  2.36%
+   • Precisión (R²):                     0.0509
+   • Error Absoluto Promedio (MAE):     $11.44
+   • Raíz del Error Cuadrático (RMSE):  $17.55
+   • Error Porcentual Promedio (MAPE):  1.34%
 
 2. DATOS PROCESADOS:
    • Total de registros analizados:      6,136
@@ -19,38 +20,38 @@ MODELO UTILIZADO: Random Forest Tuned
 3. ANÁLISIS POR CLUSTER:
 
    CLUSTER 0:
-   • Cantidad de productos:              4,853
-   • Ventas promedio actual:             $11.75
-   • Ventas predichas promedio:          $14.36
-   • Variación esperada:                 +22.25%
-   • Error promedio de predicción:       205.04%
+   • Cantidad de productos:              6,086
+   • Ventas promedio actual:             $26.82
+   • Ventas predichas promedio:          $10.16
+   • Variación esperada:                 -62.10%
+   • Error promedio de predicción:       102.69%
 
    CLUSTER 1:
-   • Cantidad de productos:              1,268
-   • Ventas promedio actual:             $89.35
-   • Ventas predichas promedio:          $20.50
-   • Variación esperada:                 -77.06%
-   • Error promedio de predicción:       166.62%
+   • Cantidad de productos:              49
+   • Ventas promedio actual:             $256.54
+   • Ventas predichas promedio:          $32.16
+   • Variación esperada:                 -87.47%
+   • Error promedio de predicción:       33.73%
 
    CLUSTER 2:
-   • Cantidad de productos:              15
-   • Ventas promedio actual:             $406.93
-   • Ventas predichas promedio:          $47.44
-   • Variación esperada:                 -88.34%
-   • Error promedio de predicción:       30.71%
+   • Cantidad de productos:              1
+   • Ventas promedio actual:             $640.00
+   • Ventas predichas promedio:          $50.97
+   • Variación esperada:                 -92.04%
+   • Error promedio de predicción:       21.59%
 
 
 4. PRINCIPALES VARIABLES PREDICTORAS:
 
-   • ventas_min_6m                  0.1490
-   • ventas_mean_12m                0.1347
-   • ventas_lag1                    0.0615
-   • ventas_lag9                    0.0501
-   • ventas_lag3                    0.0402
+   • ventas_mean_12m                0.1001
+   • ventas_min_6m                  0.0823
+   • ventas_mean_6m                 0.0682
+   • ventas_lag1                    0.0462
+   • ventas_lag3                    0.0388
 
 5. RECOMENDACIONES:
-   • El modelo tiene un R² de 0.1549, indicando aceptable precisión.
-   • El MAPE de 2.36% indica un excelente margen de error.
+   • El modelo tiene un R² de 0.0509, indicando aceptable precisión.
+   • El MAPE de 1.34% indica un excelente margen de error.
    • Se recomienda usar estas predicciones para planificación de inventario y recursos.
    • Monitorear continuamente el error de predicción para mejoras futuras.
 
@@ -62,5 +63,5 @@ MODELO UTILIZADO: Random Forest Tuned
    • grafico_importancia.png         → Importancia de variables
 
 ======================================================================
-Reporte generado: 2026-04-24 22:08:00
+Reporte generado: 2026-05-03 23:40:47
 ======================================================================

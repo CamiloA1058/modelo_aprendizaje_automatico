@@ -1,0 +1,68 @@
+
+===== RESULTADO DE MODELO DE DECISIÓN =====
+Accuracy: 0.7424662279182542
+Precision: 0.670760110099513
+Recall: 0.6906474820143885
+F1: 0.6805585392051557
+
+Clasificación de decisiones:
+decision
+Monitorear / mantener inventario        6825
+Reforzar stock / priorizar promoción    4723
+Name: count, dtype: int64
+
+===== MÉTRICAS DE APOYO (Regresión) =====
+MAE: 42007.611427991185
+RMSE: 73922.70293214245
+MAPE: 1.5895072597442796e+16
+
+===== REPORT DE CLASIFICACIÓN =====
+              precision    recall  f1-score   support
+
+           0       0.79      0.78      0.78      6961
+           1       0.67      0.69      0.68      4587
+
+    accuracy                           0.74     11548
+   macro avg       0.73      0.73      0.73     11548
+weighted avg       0.74      0.74      0.74     11548
+
+
+Resumen de decisiones por cluster:
+decision  Monitorear / mantener inventario  Reforzar stock / priorizar promoción
+cluster                                                                         
+0                                 0.577511                              0.422489
+2                                 1.000000                              0.000000
+Traceback (most recent call last):
+  File "C:\Users\el pepe\OneDrive\Escritorio\modelo_aprendizaje_automatico\model_k-means_random_forest.py", line 244, in <module>
+    results.to_csv('DECISIONES_PRODUCTO.csv', index=False, encoding='utf-8-sig')
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\el pepe\OneDrive\Escritorio\modelo_aprendizaje_automatico\venv\Lib\site-packages\pandas\core\generic.py", line 3988, in to_csv
+    return DataFrameRenderer(formatter).to_csv(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        path_or_buf,
+        ^^^^^^^^^^^^
+    ...<14 lines>...
+        storage_options=storage_options,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "c:\Users\el pepe\OneDrive\Escritorio\modelo_aprendizaje_automatico\venv\Lib\site-packages\pandas\io\formats\format.py", line 1025, in to_csv
+    csv_formatter.save()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "c:\Users\el pepe\OneDrive\Escritorio\modelo_aprendizaje_automatico\venv\Lib\site-packages\pandas\io\formats\csvs.py", line 251, in save
+    with get_handle(
+         ~~~~~~~~~~^
+        self.filepath_or_buffer,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        storage_options=self.storage_options,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ) as handles:
+    ^
+  File "c:\Users\el pepe\OneDrive\Escritorio\modelo_aprendizaje_automatico\venv\Lib\site-packages\pandas\io\common.py", line 926, in get_handle
+    handle = open(
+        handle,
+    ...<3 lines>...
+        newline="",
+    )
+PermissionError: [Errno 13] Permission denied: 'DECISIONES_PRODUCTO.csv'

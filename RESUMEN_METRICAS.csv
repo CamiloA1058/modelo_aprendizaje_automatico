@@ -1,7 +1,7 @@
 ﻿Métrica,Valor
-Precisión (R²),0.1549
-Error Absoluto (MAE),$12.01
-Error Cuadrático (RMSE),$16.16
-Error Porcentual (MAPE),2.36%
+Precisión (R²),0.0509
+Error Absoluto (MAE),$11.44
+Error Cuadrático (RMSE),$17.55
+Error Porcentual (MAPE),1.34%
 Productos Analizados,942
 Registros Procesados,"6,136"

@@ -41,7 +41,7 @@ print("="*70)
 print("PASO 1: CARGA Y LIMPIEZA DE DATOS")
 print("="*70)
 
-df = pd.read_csv("Query_Result.csv", sep=';')
+df = pd.read_csv("data\Query_Result.csv", sep=';')
 
 def limpiar_numero(col):
     """Convierte columnas con formato europeo a números float"""
