@@ -1,5 +1,58 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Refactorización] - 2026-05-26
+
+### 🎯 Refactorización de `train_kmeans_rf_prod.py` → Clase Reutilizable
+
+**Cambio**: El script lineal se convirtió en la clase `SalesForecastModel`, parametrizable y aplicable a cualquier dataset de ventas.
+
+**Antes**:
+- Script monolítico de ~400 líneas
+- Acoplado a `Query_Result_V3.csv`
+- Nombres de columna hardcodeados
+- Hiperparámetros fijos en el código
+
+**Después**:
+- Clase `SalesForecastModel` con 8 métodos encadenables
+- Mapeo flexible de columnas mediante `col_map`
+- Todos los hiperparámetros expuestos en el constructor
+- Compatible con cualquier CSV de ventas
+- Documentación completa en `README.md`
+
+**API**:
+```python
+model = SalesForecastModel(
+    filepath="datos.csv",
+    col_map={"id": "product_id", "sales": "revenue", ...},
+    numeric_fmt="plain"
+)
+model.run()  # Ejecuta todo
+# O paso a paso
+model.load_and_clean()
+model.build_features()
+# ... etc
+```
+
+**Beneficios**:
+✅ Reutilizable en múltiples datasets  
+✅ Sin modificar el código fuente  
+✅ Hiperparámetros configurables  
+✅ Pasos independientes y composables  
+✅ Mejor testabilidad y mantenimiento  
+
+**Métricas sin cambios**:
+- Accuracy: 67.32%
+- Precision: 60.25%
+- Recall: 86.28%
+- F1-Score: 70.95%
+
+**Archivos modificados**:
+- `scripts/train_kmeans_rf_prod.py` — refactorización completa
+- `README.md` — documentación exhaustiva
+- `docs/BITACORA.md` — detalles de la refactorización
+
+---
+
 ## [Producción Final] - 2026-05-21
 
 ### 🎯 Modelo final — `train_kmeans_rf_prod`

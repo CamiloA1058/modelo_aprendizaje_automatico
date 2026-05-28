@@ -11,6 +11,13 @@ REPORTS = OUTPUTS / "reports"
 SCRIPTS = PROJECT_ROOT / "scripts"
 LEGACY = PROJECT_ROOT / "models" / "legacy"
 DATABASE = PROJECT_ROOT / "database"
+CLEANING_SCRIPT = (
+    PROJECT_ROOT
+    / "src"
+    / "ventas_forecast"
+    / "data"
+    / "cleaning.py"
+)
 
 
 def ensure_output_dirs():

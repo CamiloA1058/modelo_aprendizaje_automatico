@@ -12,12 +12,111 @@
 
 | Rol | Script | Descripción |
 |-----|--------|-------------|
-| **Modelo final** | `scripts/train_kmeans_rf_prod.py` | Producción — predicción mensual agregada |
+| **Modelo final** | `scripts/train_kmeans_rf_prod.py` | Producción — clase reutilizable `SalesForecastModel` |
 | **Predicción por ítem** | `scripts/train_kmeans_rf.py` | Clasificación/regresión a nivel producto |
 | **Comparación** | `scripts/run_xgboost.py` | Benchmark — no es el modelo final |
 | **Comparación** | `scripts/run_prophet.py` | Benchmark — no es el modelo final |
 
 **Dataset**: `data/raw/Query_Result_V3.csv`
+
+---
+
+## 🔄 Refactorización (2026-05-26)
+
+### ✨ Cambio principal: `train_kmeans_rf_prod.py` ahora es una clase reutilizable
+
+#### Antes
+- Script lineal de ~400 líneas
+- Acoplado a `Query_Result_V3.csv`
+- Nombres de columna hardcodeados
+- Hiperparámetros enterrados en el código
+- Imposible de reutilizar en otros datasets
+
+#### Después
+- Clase `SalesForecastModel` parametrizable
+- Acepta cualquier CSV con mapeo flexible de columnas
+- Todos los hiperparámetros expuestos en el constructor
+- 8 pasos independientes y encadenables:
+  1. `load_and_clean()` — carga y normalización numérica
+  2. `build_features()` — lags, medias móviles, logarítmicas, estacionalidad
+  3. `cluster()` — segmentación KMeans
+  4. `prepare_split()` — definición de features y split temporal
+  5. `train_classifier()` — RandomForestClassifier con métricas
+  6. `train_regressor()` — RandomForestRegressor (top N productos)
+  7. `build_results()` — construcción y exportación de resultados
+  8. `plot()` — visualización interactiva
+
+#### Parámetros del constructor
+
+```python
+SalesForecastModel(
+    filepath,                    # Ruta al CSV
+    sep=";",                     # Separador de columnas
+    encoding="utf-8",            # Codificación
+    col_map=None,                # Mapeo {rol: nombre_en_csv}
+    output_path=None,            # Ruta de salida (default: carpeta del CSV)
+    n_clusters=3,                # Clusters KMeans
+    lags=[1, 2, 3, 6],          # Lags temporales
+    growth_threshold=1.05,       # Umbral crecimiento (+5%)
+    clf_threshold=0.58,          # Umbral probabilidad clasificador
+    top_n_products=200,          # Productos para el regresor
+    train_ratio=0.8,             # Proporción entrenamiento
+    numeric_fmt="dot_comma",     # Formato: "dot_comma" o "plain"
+)
+```
+
+#### Mapeo de columnas (`col_map`)
+
+| Rol interno   | Default    | Tu CSV |
+|---------------|------------|---------|
+| `id`          | CODIGO     | ⚙️ personalizable |
+| `description` | DESCRIPCION | ⚙️ personalizable |
+| `year`        | ANIO       | ⚙️ personalizable |
+| `month`       | MES        | ⚙️ personalizable |
+| `sales`       | VENTAS     | ⚙️ personalizable |
+| `total_sold`  | TOTAL_VENDIDO | ⚙️ personalizable |
+| `avg_price`   | PRECIO_PROMEDIO | ⚙️ personalizable |
+| `frequency`   | FRECUENCIA | ⚙️ personalizable |
+
+#### Ejemplos de uso
+
+**Dataset original (sin cambios)**:
+```python
+from train_kmeans_rf_prod import SalesForecastModel
+model = SalesForecastModel(filepath="data/raw/Query_Result_V3.csv")
+model.run()
+```
+
+**Dataset con columnas en inglés**:
+```python
+model = SalesForecastModel(
+    filepath="sales_2024.csv",
+    sep=",",
+    col_map={
+        "id": "product_id",
+        "description": "product_name",
+        "sales": "revenue",
+        "total_sold": "units_sold",
+        # ... resto del mapeo
+    },
+    numeric_fmt="plain",
+)
+model.run()
+```
+
+**Ejecutar pasos por separado**:
+```python
+model = SalesForecastModel(filepath="mi_dataset.csv")
+model.load_and_clean()
+model.build_features()
+model.cluster()
+# ... inspeccionar datos intermedios
+model.prepare_split()
+model.train_classifier()
+model.train_regressor()
+model.build_results()
+model.plot(product_id="ABC123")
+```
 
 ---
 

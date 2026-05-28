@@ -70,6 +70,57 @@ class DatasetCleaner:
         print(f"Filas eliminadas: {removed_rows}")
         print(f"Filas restantes: {len(self.df)}")
 
+    def remove_price_anomalies(
+        self,
+        price_column,
+        qty_column,
+        total_column,
+        min_price=10,
+    ):
+        """
+        Elimina registros con precio anómalo.
+
+        Un registro es anómalo cuando:
+          1. PRECIO_PROMEDIO <= min_price  (precio simbólico, ej: $1)
+          2. VENTAS == TOTAL_VENDIDO       (unidades = total → sin precio real)
+
+        Estos registros corresponden a cortesías, errores de digitación
+        o productos sin precio configurado en el sistema (VALORU = 1).
+
+        Parámetros
+        ----------
+        price_column : nombre de la columna de precio promedio
+        qty_column   : nombre de la columna de cantidad vendida (VENTAS)
+        total_column : nombre de la columna de total vendido (TOTAL_VENDIDO)
+        min_price    : umbral mínimo de precio válido (default 10)
+        """
+        if self.df is None:
+            raise Exception("Primero debes cargar el dataset.")
+
+        original_rows = len(self.df)
+
+        def _to_float(col):
+            return (
+                col.astype(str)
+                .str.replace('.', '', regex=False)
+                .str.replace(',', '.', regex=False)
+                .astype(float)
+            )
+
+        precio = _to_float(self.df[price_column])
+        ventas = _to_float(self.df[qty_column])
+        total  = _to_float(self.df[total_column])
+
+        mascara_anomalos = (precio <= min_price) | (ventas == total)
+        self.df = self.df[~mascara_anomalos].copy()
+
+        removed_rows = original_rows - len(self.df)
+
+        print("\n===== LIMPIEZA DE PRECIOS ANÓMALOS =====")
+        print(f"Umbral mínimo de precio: ${min_price}")
+        print(f"Filas eliminadas: {removed_rows} ({removed_rows/original_rows*100:.1f}%)")
+        print(f"Filas restantes: {len(self.df)}")
+
     def save_dataset(
         self,
         output_path,
