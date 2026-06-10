@@ -214,7 +214,7 @@
         <span id="mes-banner-text">Predicción para —</span>
       </div>
 
-      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+      <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="kpi blue">
           <div class="kpi-label">Productos predichos</div>
           <div class="kpi-value" id="kpi-total">—</div>
@@ -229,6 +229,11 @@
           <div class="kpi-label">Mantener stock</div>
           <div class="kpi-value" id="kpi-mantener">—</div>
           <div class="kpi-sub" id="kpi-mantener-pct">—</div>
+        </div>
+        <div class="kpi red">
+          <div class="kpi-label">Reducir stock</div>
+          <div class="kpi-value" id="kpi-reducir">—</div>
+          <div class="kpi-sub" id="kpi-reducir-pct">—</div>
         </div>
         <div class="kpi amber">
           <div class="kpi-label">Ventas predichas</div>
@@ -266,6 +271,20 @@
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:20px;">
+        <div class="section-title">Productos con mayor probabilidad de reducción de ventas</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Código</th><th>Descripción</th>
+              <th>Ventas base</th><th>Predicción</th>
+              <th>Prob. reducción</th><th>Decisión</th>
+            </tr></thead>
+            <tbody id="top-risk-body"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card">
         <div class="section-title">Productos con mayor probabilidad de crecimiento</div>
         <div class="table-wrap">
@@ -295,6 +314,7 @@
         <option value="">Todas las decisiones</option>
         <option value="Reforzar stock">Reforzar stock</option>
         <option value="Mantener stock">Mantener stock</option>
+        <option value="Reducir stock">Reducir stock</option>
       </select>
       <select id="sort-by" onchange="filterProducts()">
         <option value="prob">Ordenar: probabilidad</option>
@@ -368,6 +388,11 @@
             <label style="font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Umbral de crecimiento (%)</label>
             <input type="text" id="param-growth" value="5" style="width:100%">
             <p style="font-size:11px;color:var(--muted);margin-top:3px;">Mínimo para recomendar "Reforzar stock"</p>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Umbral de reducción (%)</label>
+            <input type="text" id="param-reduce" value="5" style="width:100%">
+            <p style="font-size:11px;color:var(--muted);margin-top:3px;">Caída mínima para recomendar "Reducir stock"</p>
           </div>
           <div>
             <label style="font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Segmentos KMeans</label>
@@ -462,7 +487,9 @@ async function runModel() {
   if (_selectedFile) fd.append('file', _selectedFile);
 
   const growth = parseFloat(document.getElementById('param-growth').value) / 100;
+  const reduce = parseFloat(document.getElementById('param-reduce').value) / 100;
   fd.append('growth_threshold', (1 + growth).toFixed(2));
+  fd.append('reduce_threshold', (1 - reduce).toFixed(2));
   fd.append('n_clusters',  document.getElementById('param-clusters').value);
   fd.append('min_months',  document.getElementById('param-minmonths').value);
 
@@ -541,19 +568,23 @@ async function loadSummary() {
   document.getElementById('kpi-total').textContent    = fmt(d.total);
   document.getElementById('kpi-reforzar').textContent = fmt(d.reforzar);
   document.getElementById('kpi-mantener').textContent = fmt(d.mantener);
+  document.getElementById('kpi-reducir').textContent  = fmt(d.reducir);
   document.getElementById('kpi-pred').textContent     = COP(d.pred_total);
 
   const pctRef = d.total ? Math.round(d.reforzar / d.total * 100) : 0;
   const pctMan = d.total ? Math.round(d.mantener / d.total * 100) : 0;
+  const pctRed = d.total ? Math.round(d.reducir  / d.total * 100) : 0;
   document.getElementById('kpi-reforzar-pct').textContent = pctRef + '% del total analizado';
   document.getElementById('kpi-mantener-pct').textContent = pctMan + '% del total analizado';
+  document.getElementById('kpi-reducir-pct').textContent  = pctRed + '% del total analizado';
   document.getElementById('kpi-variacion').innerHTML = d.variacion != null
     ? `${deltaHtml(d.variacion)} vs mes anterior (top productos)`
     : 'vs mes anterior';
 
   renderHistChart(d.historial, d.pred_total, d.mes_predicho);
-  renderDonut(d.reforzar, d.mantener);
+  renderDonut(d.reforzar, d.mantener, d.reducir);
   renderMetricas(d.metricas);
+  renderTopRisk(d.top_risk);
   renderTopGrowth(d.top_growth);
   setSidebarStatus('done', d.mes_predicho);
 }
@@ -609,14 +640,14 @@ function renderHistChart(historial, pred_total, mes_predicho) {
   });
 }
 
-function renderDonut(reforzar, mantener) {
+function renderDonut(reforzar, mantener, reducir) {
   if (_chartDonut) _chartDonut.destroy();
-  const total = reforzar + mantener;
+  const total = reforzar + mantener + reducir;
   _chartDonut = new Chart(document.getElementById('chart-donut'), {
     type: 'doughnut',
     data: {
-      labels: ['Reforzar stock', 'Mantener stock'],
-      datasets: [{ data: [reforzar, mantener], backgroundColor: ['#0F6E56', '#D3D1C7'], borderWidth: 0, hoverOffset: 4 }]
+      labels: ['Reforzar stock', 'Mantener stock', 'Reducir stock'],
+      datasets: [{ data: [reforzar, mantener, reducir], backgroundColor: ['#0F6E56', '#D3D1C7', '#A32D2D'], borderWidth: 0, hoverOffset: 4 }]
     },
     options: {
       responsive: false, cutout: '72%',
@@ -631,6 +662,10 @@ function renderDonut(reforzar, mantener) {
     <div style="display:flex;align-items:center;gap:8px;">
       <span style="width:10px;height:10px;border-radius:2px;background:#D3D1C7;flex-shrink:0;"></span>
       <span>Mantener — <strong>${fmt(mantener)}</strong> <span style="color:var(--muted)">(${Math.round(mantener/total*100)}%)</span></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="width:10px;height:10px;border-radius:2px;background:#A32D2D;flex-shrink:0;"></span>
+      <span>Reducir — <strong>${fmt(reducir)}</strong> <span style="color:var(--muted)">(${Math.round(reducir/total*100)}%)</span></span>
     </div>`;
 }
 
@@ -647,6 +682,23 @@ function renderMetricas(m) {
       <div class="kpi-label">${i.label}</div>
       <div class="kpi-value" style="font-size:20px;">${Math.round(i.val * 100)}%</div>
     </div>`).join('');
+}
+
+function renderTopRisk(rows) {
+  document.getElementById('top-risk-body').innerHTML = rows.map(r => `
+    <tr onclick="openDetail('${r.CODIGO}')">
+      <td class="codigo">${r.CODIGO}</td>
+      <td class="desc" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
+      <td>${COP(r.ventas_base)}</td>
+      <td>${COP(r.ventas_predichas)}</td>
+      <td>
+        <div class="prob-wrap">
+          <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_reduccion*100)}%;background:var(--red)"></div></div>
+          <span class="prob-val">${Math.round(r.prob_reduccion*100)}%</span>
+        </div>
+      </td>
+      <td>${decisionBadge(r.decision)}</td>
+    </tr>`).join('');
 }
 
 function renderTopGrowth(rows) {
@@ -667,9 +719,9 @@ function renderTopGrowth(rows) {
 }
 
 function decisionBadge(d) {
-  return d && d.includes('Reforzar')
-    ? '<span class="badge green">↑ Reforzar stock</span>'
-    : '<span class="badge gray">Mantener</span>';
+  if (d && d.includes('Reforzar')) return '<span class="badge green">↑ Reforzar stock</span>';
+  if (d && d.includes('Reducir'))  return '<span class="badge red">↓ Reducir stock</span>';
+  return '<span class="badge gray">Mantener</span>';
 }
 
 // ── Productos ────────────────────────────────────────────────────────────────

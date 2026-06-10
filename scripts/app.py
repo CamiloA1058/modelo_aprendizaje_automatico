@@ -63,9 +63,10 @@ def _run_model(filepath, col_map, params):
             output_path=DEFAULT_OUTPUT,
             col_map=col_map or None,
             n_clusters=int(params.get("n_clusters", 3)),
-            growth_threshold=float(params.get("growth_threshold", 1.05)),
+            growth_threshold=float(params.get("growth_threshold", 1.15)),
+            reduce_threshold=float(params.get("reduce_threshold", 0.90)),
             clf_threshold=float(params.get("clf_threshold", 0.58)),
-            top_n_products=int(params.get("top_n_products", 200)),
+            top_n_products=int(params.get("top_n_products", 1900)),
             train_ratio=float(params.get("train_ratio", 0.8)),
             numeric_fmt=params.get("numeric_fmt", "dot_comma"),
             min_months=int(params.get("min_months", 6)),
@@ -159,7 +160,8 @@ def api_summary():
 
     total     = len(df)
     reforzar  = int((df["decision"] == "Reforzar stock").sum())
-    mantener  = total - reforzar
+    reducir   = int((df["decision"] == "Reducir stock").sum())
+    mantener  = total - reforzar - reducir
     avg_prob  = float(df["prob_crecimiento"].mean())
 
     # Ventas del último mes (base) y predichas
@@ -195,12 +197,28 @@ def api_summary():
         .to_dict(orient="records")
     )
 
+    # Top productos con mayor probabilidad de reducción
+    top_risk = (
+        df[[c("id"), c("description"), "prob_reduccion",
+            pred_col, c("total_sold"), "decision", "cluster"]]
+        .sort_values("prob_reduccion", ascending=False)
+        .head(20)
+        .fillna(0)
+        .rename(columns={
+            c("id"):          "CODIGO",
+            c("description"): "DESCRIPCION",
+            c("total_sold"):  "ventas_base",
+        })
+        .to_dict(orient="records")
+    )
+
     return jsonify({
         "ok":          True,
         "mes_predicho": _state["mes_predicho"],
         "total":       total,
         "reforzar":    reforzar,
         "mantener":    mantener,
+        "reducir":     reducir,
         "avg_prob":    round(avg_prob * 100, 1),
         "pred_total":  round(pred_total, 0),
         "base_total":  round(base_total, 0),
@@ -209,6 +227,7 @@ def api_summary():
         "historial":   hist_list,
         "metricas":    metricas,
         "top_growth":  top,
+        "top_risk":    top_risk,
     })
 
 
