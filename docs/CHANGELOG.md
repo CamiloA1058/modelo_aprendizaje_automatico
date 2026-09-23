@@ -1,5 +1,33 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Mejora] - 2026-09-22
+
+### Transformación logarítmica en el clustering y justificación de k=3
+
+**Problema**: con las variables en escala original, la silueta máxima era k=2 (0,95), pero ese agrupamiento solo aislaba 72 registros de ventas extremas frente a 21.123; no representaba segmentos de productos.
+
+**Cambio**: las variables de clustering (ventas, frecuencia, precio) se transforman con `log1p` antes del `RobustScaler` (`_cluster_features`), tanto en `cluster()` como en `evaluate_k()`. Se mantiene k=3.
+
+**Selección de k sobre `Query_Result_V5.csv`** (partición de entrenamiento, `scripts/select_k.py`):
+
+| k | Inercia | Silueta |
+|---|---|---|
+| 2 | 20.162,2 | 0,3493 |
+| **3** | **13.248,3** | **0,3695** |
+| 4 | 10.718,8 | 0,3225 |
+| 5 | 8.786,5 | 0,3284 |
+| 6 | 7.488,4 | 0,3285 |
+| 7 | 6.563,4 | 0,3418 |
+| 8 | 5.903,6 | 0,3142 |
+| 9 | 5.356,2 | 0,3201 |
+| 10 | 4.897,5 | 0,3196 |
+
+k=3 obtiene la silueta máxima, coincide con el codo de la inercia y produce segmentos equilibrados (4.588 / 9.531 / 7.076 registros).
+
+**Métricas del clasificador (promedio ponderado)**: Accuracy 62,16 → 62,26 %, Precision 64,16 → 64,35 %, Recall 62,16 → 62,26 %, F1 62,75 → 62,91 %.
+
+---
+
 ## [Corrección] - 2026-09-22 (KMeans)
 
 ### Fuga de datos en el clustering + selección de k (`train_kmeans_rf_prod.py`)

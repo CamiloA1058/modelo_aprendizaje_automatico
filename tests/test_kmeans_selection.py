@@ -36,7 +36,7 @@ class ClusterNoLeakageTest(unittest.TestCase):
         self.model.cluster()
         self.model.prepare_split()
 
-    def test_cluster_scaler_center_is_median_of_training_partition(self):
+    def test_cluster_scaler_center_is_median_of_log_training_partition(self):
         c = self.model._c
         cluster_cols = [c("total_sold"), c("frequency"), c("avg_price")]
 
@@ -64,8 +64,11 @@ class ClusterNoLeakageTest(unittest.TestCase):
             np.allclose(X_train.median().to_numpy(), X_full.median().to_numpy())
         )
 
+        # Las variables de clustering se transforman con log1p antes de
+        # escalar, para que los valores extremos no dominen los clústeres.
         np.testing.assert_allclose(
-            self.model.cluster_scaler.center_, X_train.median().to_numpy()
+            self.model.cluster_scaler.center_,
+            np.log1p(X_train).median().to_numpy(),
         )
 
     def test_every_row_has_cluster_label(self):

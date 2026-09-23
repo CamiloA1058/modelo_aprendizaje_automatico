@@ -247,6 +247,16 @@ class SalesForecastModel:
         return df_train, train_idx, test_idx
 
     # ── 3. CLUSTERING ─────────────────────────────────────────────────────────
+    def _cluster_features(self, frame):
+        """
+        Variables de clustering (ventas, frecuencia, precio) con log1p: las
+        ventas son muy asimétricas y, en escala original, KMeans separa solo
+        los valores extremos en lugar de segmentos de productos.
+        """
+        c = self._c
+        cols = [c("total_sold"), c("frequency"), c("avg_price")]
+        return np.log1p(frame[cols].fillna(0).clip(lower=0))
+
     def cluster(self):
         """
         Ajusta el escalador y KMeans SOLO con la partición de entrenamiento
@@ -254,12 +264,9 @@ class SalesForecastModel:
         luego asigna cluster a TODAS las filas de self.df (incluyendo prueba
         y el mes a predecir) con predict().
         """
-        c = self._c
-        cluster_cols = [c("total_sold"), c("frequency"), c("avg_price")]
-
         df_train, train_idx, _ = self._build_train_frame()
-        X_train = df_train.loc[train_idx, cluster_cols].fillna(0)
-        X_all   = self.df[cluster_cols].fillna(0)
+        X_train = self._cluster_features(df_train.loc[train_idx])
+        X_all   = self._cluster_features(self.df)
 
         self.cluster_scaler = RobustScaler()
         self.cluster_scaler.fit(X_train)
@@ -288,11 +295,8 @@ class SalesForecastModel:
 
         Devuelve un DataFrame con columnas: k, inercia, silueta.
         """
-        c = self._c
-        cluster_cols = [c("total_sold"), c("frequency"), c("avg_price")]
-
         df_train, train_idx, _ = self._build_train_frame()
-        X_train = df_train.loc[train_idx, cluster_cols].fillna(0)
+        X_train = self._cluster_features(df_train.loc[train_idx])
 
         scaler = RobustScaler()
         X_scaled = scaler.fit_transform(X_train)
