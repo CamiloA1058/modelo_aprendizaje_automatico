@@ -123,12 +123,14 @@ class ClfParamsTest(unittest.TestCase):
 
     def test_default_clf_params_are_the_tuned_values(self):
         # Valores seleccionados con tune_classifier() sobre Query_Result_V5.csv
+        # (recalculado tras el completado de calendario, ver CHANGELOG
+        # 2026-09-23: max_depth pasa de 14 a None).
         model = _build_model()
         self.assertEqual(model.clf_params, tk.DEFAULT_CLF_PARAMS)
 
         model.train_classifier()
         self.assertEqual(model.clf.n_estimators, 300)
-        self.assertEqual(model.clf.max_depth, 14)
+        self.assertIsNone(model.clf.max_depth)
         self.assertEqual(model.clf.min_samples_leaf, 1)
 
     def test_custom_clf_params_are_applied_to_classifier(self):

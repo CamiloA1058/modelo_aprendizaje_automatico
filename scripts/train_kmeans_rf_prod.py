@@ -55,10 +55,12 @@ DEFAULT_COL_MAP = {
 
 # ── Hiperparámetros del clasificador (RandomForest) ──────────────────────────
 # Valores seleccionados con tune_classifier() (GridSearchCV + TimeSeriesSplit
-# mensual) sobre Query_Result_V5.csv; ver scripts/tune_rf.py.
+# mensual) sobre Query_Result_V5.csv; ver scripts/tune_rf.py. Re-ajustados
+# tras el completado de calendario (ver CHANGELOG 2026-09-23): max_depth pasa
+# de 14 a None (sin límite de profundidad).
 DEFAULT_CLF_PARAMS = {
     "n_estimators": 300,
-    "max_depth": 14,
+    "max_depth": None,
     "min_samples_leaf": 1,
 }
 
@@ -214,10 +216,75 @@ class SalesForecastModel:
         self._ultimo_mes = self.df["fecha"].max()
         self._mes_pred   = self._ultimo_mes + pd.DateOffset(months=1)
 
+        # Completar el calendario mensual de cada producto (ver
+        # _complete_calendar): sin esto, groupby(id).shift()/rolling() en
+        # build_features() opera "por fila" (mes con ventas anterior) en vez
+        # de "por mes calendario", porque un mes sin ninguna venta no tiene
+        # fila en el CSV crudo.
+        self.df = self._complete_calendar(self.df)
+
         print(f"[✓] Datos cargados: {len(self.df):,} registros | "
               f"{self.df[c('id')].nunique():,} productos únicos")
         print(f"[✓] Último mes en datos: {self._ultimo_mes.strftime('%Y-%m')}")
         print(f"[✓] Mes a predecir:      {self._mes_pred.strftime('%Y-%m')}")
+
+    # ── 1b. COMPLETADO DE CALENDARIO ─────────────────────────────────────────
+    def _complete_calendar(self, df):
+        """
+        Completa el calendario de cada producto con un registro por mes,
+        desde su PRIMER mes con ventas hasta el último mes GLOBAL del
+        dataset (self._ultimo_mes), rellenando con cero los meses en los que
+        el producto no vendió (esas filas no existen en el CSV crudo).
+
+        Sin este paso, target/lag_k/mean_3/mean_6 (build_features) se
+        calculan con groupby(id).shift()/rolling(), que operan sobre la
+        POSICIÓN de la fila dentro del grupo, no sobre el mes calendario: un
+        producto que no vendió un mes simplemente "salta" ese mes, como si
+        el mes con ventas siguiente fuera el mes inmediatamente posterior
+        (HALLAZGO 2026-09-23: 40,2 % de las filas de V5 con un salto > 1 mes
+        hasta la fila siguiente).
+
+        avg_price en los meses sin ventas: se usa el ÚLTIMO precio conocido
+        del producto (forward-fill), porque no hubo ninguna transacción ese
+        mes de la que derivar un precio propio; el precio de lista no
+        desaparece por no haber vendido.
+
+        Devuelve el DataFrame completado (una fila por producto-mes, sin
+        huecos). Imprime cuántas filas de venta 0 se agregaron.
+        """
+        c = self._c
+        n_antes = len(df)
+
+        grupos_completos = []
+        for prod_id, g in df.groupby(c("id"), sort=False):
+            g = g.sort_values("fecha").set_index("fecha")
+            calendario = pd.date_range(g.index.min(), self._ultimo_mes, freq="MS")
+            g = g.reindex(calendario)
+
+            g[c("id")]          = prod_id
+            g[c("description")] = g[c("description")].ffill()
+            g[c("sales")]       = g[c("sales")].fillna(0.0)
+            g[c("total_sold")]  = g[c("total_sold")].fillna(0.0)
+            g[c("frequency")]   = g[c("frequency")].fillna(0.0)
+            g[c("avg_price")]   = g[c("avg_price")].ffill()
+
+            grupos_completos.append(g)
+
+        df_completo = pd.concat(grupos_completos)
+        df_completo.index.name = "fecha"
+        df_completo = df_completo.reset_index()
+
+        df_completo[c("year")]  = df_completo["fecha"].dt.year
+        df_completo[c("month")] = df_completo["fecha"].dt.month
+        df_completo = (
+            df_completo.sort_values([c("id"), "fecha"]).reset_index(drop=True)
+        )
+
+        n_ceros = len(df_completo) - n_antes
+        print(f"[✓] Calendario completado: {n_ceros:,} filas de mes sin venta "
+              f"(total_sold=0) agregadas ({n_antes:,} → {len(df_completo):,} filas)")
+
+        return df_completo
 
     # ── 2. FEATURES ───────────────────────────────────────────────────────────
     def build_features(self):
@@ -263,9 +330,18 @@ class SalesForecastModel:
     # ── Helper compartido: partición temporal de entrenamiento/prueba ────────
     def _build_train_frame(self):
         """
-        Filtra las filas con target (mes siguiente) conocido y válido, y aplica
-        el split temporal por producto (primeras train_ratio filas de cada
-        producto, ordenadas por fecha, van a entrenamiento).
+        Filtra las filas con target (mes siguiente calendario) conocido y con
+        ventas actuales, y aplica el split temporal por producto (primeras
+        train_ratio filas de cada producto, ordenadas por fecha, van a
+        entrenamiento).
+
+        target > 0 NO se exige: con el calendario completo (ver
+        _complete_calendar), un mes siguiente en cero es una observación
+        válida y necesaria (es justo la que entrena la clase "Reducir" en
+        prepare_split). Solo se excluyen las filas cuyo MES ACTUAL no tuvo
+        ventas (total_sold == 0): el growth_ratio (target / total_sold)
+        quedaría indefinido (división por cero) y esas filas no aportan una
+        decisión de "reforzar/mantener/reducir" con base en un mes real.
 
         Usado tanto por cluster() como por prepare_split() para que ambos
         entrenen con exactamente la misma partición y no haya fuga de datos
@@ -277,7 +353,6 @@ class SalesForecastModel:
 
         df_train = self.df[
             self.df["target"].notna() &
-            (self.df["target"] > 0) &
             (self.df[c("total_sold")] > 0)
         ].copy().reset_index(drop=True)
 
@@ -408,8 +483,15 @@ class SalesForecastModel:
         self._test_idx   = test_idx
 
         # ── Dataset de predicción real ────────────────────────────────────────
-        # Productos que tienen dato en el último mes con suficiente historial
-        conteo = self.df.groupby(c("id"))["fecha"].count()
+        # Productos que tienen dato en el último mes con suficiente historial.
+        # min_months cuenta meses CON VENTAS (total_sold > 0), no filas de
+        # calendario: desde _complete_calendar, self.df tiene una fila por
+        # cada mes calendario (incluyendo los de venta 0), así que contar
+        # filas sobreestimaría el historial real de un producto con huecos.
+        conteo = (
+            self.df[self.df[c("total_sold")] > 0]
+            .groupby(c("id"))["fecha"].count()
+        )
         prods_ok = conteo[conteo >= self.min_months].index
 
         df_pred = self.df[
@@ -619,7 +701,11 @@ class SalesForecastModel:
         )
 
         es_top       = self._df_train[c("id")].isin(self._top_prods)
-        tiene_target = self._df_train["target"] > 0
+        # target > 0 ya no se exige (self._df_train, construido por
+        # _build_train_frame(), ya garantiza target.notna(); un mes
+        # siguiente en cero es una observación válida de la que también se
+        # quiere aprender y evaluar: log1p(0) = 0 no da problema numérico).
+        tiene_target = self._df_train["target"].notna()
         es_train     = self._df_train.index.isin(self._train_idx)
         es_test      = self._df_train.index.isin(self._test_idx)
 
