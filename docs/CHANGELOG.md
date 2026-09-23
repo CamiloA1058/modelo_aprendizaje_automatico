@@ -1,5 +1,28 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [EDA] - 2026-09-23
+
+### Análisis exploratorio de datos (`src/ventas_forecast/eda.py`, `scripts/eda.py`)
+
+**Por qué**: las fases 2 (comprensión de datos) y 3 (preparación de datos) de CRISP-DM necesitan evidencia exploratoria explícita del trabajo de grado — calidad de datos, tamaño del dataset en cada etapa de limpieza, clasificación ABC, intermitencia de la demanda y estacionalidad — que hasta ahora solo existía implícita en el código de `SalesForecastModel`.
+
+**Nuevas funciones puras** (`src/ventas_forecast/eda.py`, TDD con `tests/test_eda.py`, RED→GREEN, 12 casos):
+- `data_quality_summary(raw_df, col_map)`: filas/columnas, nulos por columna, duplicados exactos, filas con id de producto nulo, número de productos y rango de fechas — sobre el CSV **crudo**, antes de cualquier agregación.
+- `monthly_totals(df, date_col, value_col)` / `seasonal_profile(monthly)`: total por mes calendario y, a partir de esa serie, promedio por número de mes (1-12) junto con el número de AÑOS que aportaron una observación a ese mes (para exponer lo débil de la estimación con solo 2-3 años de historial).
+- `abc_classification(df, id_col, value_col, a=0.80, b=0.95)`: tabla ABC por producto (participación acumulada descendente) y resumen (productos y % de ventas por clase). Regla de frontera DECIDIDA y probada explícitamente: la clase se define por el acumulado INCLUYENDO al propio producto (A si ≤80 %, B si ≤95 %, C en el resto); un producto que por sí solo hace que el acumulado SUPERE un corte (p. ej. uno que concentra el 82 % de las ventas) queda clasificado en la clase siguiente, no en la anterior.
+- `intermittency_summary(df, id_col, value_col)`: fracción global de filas producto-mes con venta cero y distribución (mediana/Q1/Q3) de esa fracción por producto, sobre el calendario ya completo.
+
+**Script** `scripts/eda.py`: usa el CSV crudo solo para la calidad de datos, y el pipeline real (`load_and_clean` → `build_features` → `cluster` → `prepare_split`, instrumentando `_complete_calendar` sin alterar su lógica) para todo lo demás. Genera `outputs/reports/eda_resumen.txt` y 4 figuras (paleta del proyecto, sin títulos dentro de la imagen): `eda_ventas_mensuales.png`, `eda_estacionalidad.png`, `eda_pareto_abc.png`, `eda_distribucion_ventas.png`.
+
+**Resultados reales** (`Query_Result_V5.csv`, 18,0 s):
+
+- **Calidad de datos (crudo)**: 78.921 filas, 13 columnas, 0 duplicados exactos. Único nulo: `CODIGO` en 8 filas (`DESCRIPCION="VARIOS"`, 435.000 COP, 0,0033 % del total). HECHO verificado en el código: `load_and_clean()` agrupa con `groupby([id, description, fecha])`, que usa `dropna=True` por defecto — esas 8 filas se excluyen silenciosamente del agregado y nunca llegan a clustering/entrenamiento/predicción (pérdida económica despreciable, pero silenciosa). 5.654 productos; rango 2024-01-09 a 2026-03-27 (27 meses distintos); primer mes (2024-01) parcial (arranca el día 9) y último mes (2026-03) parcial (termina el día 27).
+- **Tamaño del dataset**: 78.921 filas crudas → 34.938 filas producto-mes (antes de completar calendario) → **100.937 filas** tras `_complete_calendar` (65.999 filas de mes sin venta agregadas), 5.654 productos, 27 meses calendario.
+- **Clasificación ABC** (participación de `TOTAL_VENDIDO`, corte 80/95): Clase A 532 productos (9,4 %) → 79,97 % de las ventas; Clase B 963 productos (17,0 %) → 15,02 %; Clase C 4.159 productos (73,6 %) → 5,00 %. Concentración fuerte: menos del 10 % de los productos explica el 80 % de las ventas.
+- **Intermitencia**: 65,39 % de las filas producto-mes tienen venta cero. Distribución por producto de esa fracción: mediana 71,43 %, Q1 50,00 %, Q3 86,36 % — la mayoría de los productos no vende en más de la mitad de sus meses activos, y para la mitad de los productos eso ocurre en más del 71 % de los meses.
+- **Estacionalidad** (promedio mensual, ADVERTENCIA — solo 2-3 años de historial): mínimo en abril (344,1 M COP, n=2 años) y máximo en julio (681,1 M COP, n=2 años); enero/febrero/marzo tienen 3 años de historial (2024-2026), el resto solo 2 — estimación estacional débil, no concluyente para el documento final.
+- **Perfil de clusters** (partición de entrenamiento, escala original, k=3): cluster 0 — 10.411 filas, mediana `TOTAL_VENDIDO` 120.000 COP, `FRECUENCIA` 2,0, `PRECIO_PROMEDIO` 29.850 COP; cluster 1 — 8.433 filas, 6.408 COP, 1,0, 1.200 COP (ventas y precio bajos, baja frecuencia); cluster 2 — 4.876 filas, 339.500 COP, 11,0, 13.336 COP (mayor frecuencia y ventas, precio intermedio). Interpretación cualitativa completa (nombres de segmento) se deja para el documento de tesis con estos números como evidencia.
+
 ## [Comparación] - 2026-09-23
 
 ### Comparación justa de modelos sobre V5 (`scripts/compare_models.py`, `src/ventas_forecast/benchmarks.py`)
@@ -46,6 +69,9 @@ Random Forest gana en todas las métricas (XGBoost sin ajuste de hiperparámetro
 Random Forest gana en todas las métricas. ARIMA(1,1,1) presenta 3 pronósticos disparados en productos con historial corto (9 a 13 meses); sin esos 3 casos su MAE sería 353.010, y Random Forest seguiría siendo el mejor. No se recortaron sus predicciones.
 
 Los scripts `scripts/run_xgboost.py` y `scripts/run_prophet.py` usan datasets antiguos y quedan sustituidos por `scripts/compare_models.py` para la comparación del trabajo de grado.
+
+
+**Anomalía detectada (pendiente de decisión)**: el 19/02/2026, 1.761 productos distintos registran exactamente 12 unidades a 111 COP (1.332 COP cada uno) — el pico del histograma de distribución. Representa el 0,018 % de las ventas en pesos, pero ~5 % de los meses producto-mes con ventas; no parece una venta real (posible carga o ajuste de inventario).
 
 ---
 
