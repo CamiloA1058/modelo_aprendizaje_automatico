@@ -1,5 +1,28 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Corrección] - 2026-09-22
+
+### Fuga de datos en el escalado (`train_kmeans_rf_prod.py`)
+
+**Problema**: `RobustScaler` se ajustaba con todas las filas antes de la división temporal, por lo que las métricas de prueba incorporaban estadísticos (mediana e IQR) del conjunto de prueba.
+
+**Corrección**: la división temporal por producto se calcula primero; el escalador se ajusta solo con las filas de entrenamiento y luego transforma todo el conjunto.
+
+**Impacto medido sobre `Query_Result_V5.csv`** (promedio ponderado, 3 clases):
+
+| Métrica | Antes | Después |
+|---|---|---|
+| Accuracy | 62,32 % | 62,29 % |
+| Precision | 64,24 % | 64,22 % |
+| Recall | 62,32 % | 62,29 % |
+| F1 | 62,92 % | 62,89 % |
+
+El impacto es mínimo porque Random Forest es invariante a transformaciones monótonas de escala; la corrección garantiza la validez metodológica de la evaluación.
+
+**Prueba**: `tests/test_scaler_no_leakage.py` (`python -m unittest tests.test_scaler_no_leakage`).
+
+---
+
 ## [Refactorización] - 2026-05-26
 
 ### 🎯 Refactorización de `train_kmeans_rf_prod.py` → Clase Reutilizable

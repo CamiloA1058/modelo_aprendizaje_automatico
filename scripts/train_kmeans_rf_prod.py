@@ -263,7 +263,6 @@ class SalesForecastModel:
 
         X = df_train[self._features].fillna(0)
         y = df_train["target_class"]
-        X_scaled = self.scaler.fit_transform(X)
 
         # Split temporal por producto
         train_idx, test_idx = [], []
@@ -272,6 +271,11 @@ class SalesForecastModel:
             cut = int(len(g) * self.train_ratio)
             train_idx += g.index[:cut].tolist()
             test_idx  += g.index[cut:].tolist()
+
+        # El escalador se ajusta solo con entrenamiento para que las
+        # métricas de prueba no incorporen estadísticos del conjunto de prueba
+        self.scaler.fit(X.loc[train_idx])
+        X_scaled = self.scaler.transform(X)
 
         self._df_train   = df_train
         self._X          = X
