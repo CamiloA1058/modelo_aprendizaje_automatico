@@ -121,14 +121,15 @@ class TuneClassifierTest(unittest.TestCase):
 
 class ClfParamsTest(unittest.TestCase):
 
-    def test_default_clf_params_reproduce_hardcoded_rf(self):
+    def test_default_clf_params_are_the_tuned_values(self):
+        # Valores seleccionados con tune_classifier() sobre Query_Result_V5.csv
         model = _build_model()
         self.assertEqual(model.clf_params, tk.DEFAULT_CLF_PARAMS)
 
         model.train_classifier()
         self.assertEqual(model.clf.n_estimators, 300)
-        self.assertEqual(model.clf.max_depth, 10)
-        self.assertEqual(model.clf.min_samples_leaf, 3)
+        self.assertEqual(model.clf.max_depth, 14)
+        self.assertEqual(model.clf.min_samples_leaf, 1)
 
     def test_custom_clf_params_are_applied_to_classifier(self):
         model = _build_model(clf_params={"n_estimators": 7, "max_depth": 4})
@@ -137,7 +138,7 @@ class ClfParamsTest(unittest.TestCase):
         self.assertEqual(model.clf.n_estimators, 7)
         self.assertEqual(model.clf.max_depth, 4)
         # No sobreescrito: conserva el valor por defecto
-        self.assertEqual(model.clf.min_samples_leaf, 3)
+        self.assertEqual(model.clf.min_samples_leaf, 1)
 
 
 if __name__ == "__main__":

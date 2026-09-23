@@ -53,12 +53,12 @@ DEFAULT_COL_MAP = {
 }
 
 # ── Hiperparámetros del clasificador (RandomForest) ──────────────────────────
-# Valores originales hardcodeados en train_classifier(); se usan como default
-# de self.clf_params para que el comportamiento no cambie si no se ajustan.
+# Valores seleccionados con tune_classifier() (GridSearchCV + TimeSeriesSplit
+# mensual) sobre Query_Result_V5.csv; ver scripts/tune_rf.py.
 DEFAULT_CLF_PARAMS = {
     "n_estimators": 300,
-    "max_depth": 10,
-    "min_samples_leaf": 3,
+    "max_depth": 14,
+    "min_samples_leaf": 1,
 }
 
 # Grilla por defecto para tune_classifier() (GridSearchCV)

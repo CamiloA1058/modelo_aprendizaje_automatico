@@ -1,5 +1,17 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Mejora] - 2026-09-22 (adopción)
+
+### Hiperparámetros ajustados como valores por defecto
+
+`DEFAULT_CLF_PARAMS` pasa de `n_estimators=300, max_depth=10, min_samples_leaf=3` a `n_estimators=300, max_depth=14, min_samples_leaf=1` (mejor combinación de `tune_classifier()`).
+
+Métricas de prueba sobre V5 con los nuevos valores por defecto: Accuracy 64,12 %, Precision 63,93 %, Recall 64,12 %, F1 64,02 %.
+
+Nota metodológica: en la validación cruzada, las cinco mejores combinaciones quedan dentro de una desviación estándar (F1 0,6026–0,6041, σ ≈ 0,014); la mejora frente a los valores anteriores es moderada.
+
+---
+
 ## [Mejora] - 2026-09-22 (ajuste de hiperparámetros)
 
 ### Ajuste de hiperparámetros del clasificador con validación cruzada (`GridSearchCV` + `TimeSeriesSplit` mensual)
