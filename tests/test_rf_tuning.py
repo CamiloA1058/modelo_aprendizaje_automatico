@@ -160,15 +160,16 @@ class ClfParamsTest(unittest.TestCase):
 
     def test_default_clf_params_are_the_tuned_values(self):
         # Valores seleccionados con tune_classifier(scoring="f1_macro") sobre
-        # Query_Result_V5.csv (ver CHANGELOG 2026-09-23 "métrica macro":
-        # max_depth pasa de None a 14, min_samples_leaf de 1 a 5).
+        # Query_Result_V5.csv tras excluir los ajustes masivos de inventario
+        # (ver CHANGELOG 2026-09-23 "Limpieza": min_samples_leaf pasa de 5 a
+        # 3; n_estimators y max_depth no cambian).
         model = _build_model()
         self.assertEqual(model.clf_params, tk.DEFAULT_CLF_PARAMS)
 
         model.train_classifier()
         self.assertEqual(model.clf.n_estimators, 300)
         self.assertEqual(model.clf.max_depth, 14)
-        self.assertEqual(model.clf.min_samples_leaf, 5)
+        self.assertEqual(model.clf.min_samples_leaf, 3)
 
     def test_custom_clf_params_are_applied_to_classifier(self):
         model = _build_model(clf_params={"n_estimators": 7, "max_depth": 4})

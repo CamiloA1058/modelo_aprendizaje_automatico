@@ -1,5 +1,117 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Limpieza] - 2026-09-23
+
+### Ajustes masivos de inventario CONFIRMADOS y excluidos (`remove_bulk_adjustments`, `src/ventas_forecast/data/cleaning.py`)
+
+**Por qué**: la entrada anterior ([Comparación] 2026-09-23) dejaba pendiente de decisión la anomalía del 19/02/2026 (1.761 productos con exactamente 12 unidades a 111 COP cada uno). El dueño del negocio la **CONFIRMÓ como una carga/ajuste de inventario del sistema, no una venta real**: es estadísticamente imposible que 1.761 productos sin relación entre sí (tornillos, retenes, rodillos, etc.) se vendan el mismo día con idéntica cantidad e idéntico precio. Además, la limpieza debe vivir **dentro del pipeline** (no solo en el CSV curado a mano como `data/raw/cleaner.py`), porque a futuro el sistema leerá directamente la base de datos de la empresa.
+
+**Regla implementada** (`remove_bulk_adjustments(df, date_col, id_col, qty_col, price_col, min_products=100)`, función de módulo en `src/ventas_forecast/data/cleaning.py`, con envoltorio `DatasetCleaner.remove_bulk_adjustments()` para reutilizarla en scripts de limpieza offline): elimina las filas cuya combinación EXACTA (fecha, cantidad, precio) es compartida por al menos `min_products` productos **distintos** ese mismo día (se cuentan productos distintos, no filas: varias filas del mismo producto con igual fecha/cantidad/precio no inflan el conteo). No se hardcodea ninguna fecha, cantidad ni precio.
+
+**Por qué el umbral por defecto (100) es conservador** — verificado sobre `data/raw/Query_Result_V5.csv`, top 5 grupos (fecha, cantidad, precio) por número de productos distintos:
+
+| # | Fecha | Cantidad | Precio (COP) | Productos distintos |
+|---|---|---|---|---|
+| 1 | 2026-02-19 | 12 | 111 | **1.761** (caso confirmado) |
+| 2 | 2024-03-27 | 20 | 1.111 | 46 |
+| 3 | 2024-03-27 | 10 | 1.111 | 29 |
+| 4 | 2024-03-27 | 40 | 1.111 | 22 |
+| 5 | 2024-04-12 | 1 | 100 | 19 |
+
+El segundo grupo más grande (46 productos) queda muy por debajo del umbral de 100: con `min_products=100` la regla elimina **exactamente** el caso confirmado y no toca ningún otro grupo de la V5 actual.
+
+**Integración en el pipeline** (`scripts/train_kmeans_rf_prod.py`): `SalesForecastModel.load_and_clean()` aplica la regla justo después de parsear los numéricos (`_parse_numeric`) y antes de agregar a producto-mes, porque el ajuste se detecta a nivel de **fila diaria** (columna `FECHA`, agregada como nuevo rol `"date"` en `DEFAULT_COL_MAP`) — a nivel mensual varios productos legítimos podrían coincidir por casualidad. Nuevo parámetro del constructor `bulk_adjustment_min_products=100` (`None` desactiva la regla); el resumen de filas eliminadas queda en `self.cleaning_summary` (rows_removed, distinct_products, affected_dates, cop_amount) y se imprime. `scripts/app.py` no necesita cambios: no pasa este parámetro, así que usa el valor por defecto.
+
+**Pruebas nuevas** (TDD, RED→GREEN, `tests/test_bulk_adjustments.py`, 8 casos): elimina un grupo sintético que alcanza el umbral; conserva un grupo por debajo del umbral; conserva la misma cantidad/precio en fechas distintas (cada fecha se evalúa por separado); cuenta productos DISTINTOS y no filas (varias filas del mismo producto no inflan el conteo); `bulk_adjustment_min_products=None` desactiva la regla en el modelo; `load_and_clean()` la aplica de punta a punta sobre un CSV temporal con el formato real (separador `;`, números `12,00` / `1.332,00`).
+
+**Resultados sobre `Query_Result_V5.csv`**:
+- **1.761 filas eliminadas** (1.761 productos distintos, 1 fecha: 19/02/2026, **$2.345.652 COP** excluidos — 0,0176 % del total de ventas en pesos del dataset).
+- HALLAZGO adicional: de esos 1.761 productos, **580 tenían esa fila de ajuste como su ÚNICO registro** en todo el histórico y por lo tanto **desaparecen por completo** del dataset limpio (5.654 → 5.074 productos distintos). Los 1.181 productos restantes conservan su historial real, solo sin esa fila.
+- `outputs/reports/eda_resumen.txt` (sección 1, calidad de datos) ahora reporta explícitamente el ajuste excluido y los productos que desaparecen por completo.
+- El pico irreal del histograma de distribución de ventas (`outputs/figures/eda_distribucion_ventas.png`) alrededor de ~1,3 k COP **desaparece** tras la exclusión (verificado visualmente).
+
+**Recálculo de k, ajuste de hiperparámetros, evaluación, comparación y EDA sobre la V5 limpia** (antes = con el ajuste de inventario incluido, ver entradas anteriores; después = excluido):
+
+**1) Selección de k** (`scripts/select_k.py`, `evaluate_k`) — k=3 **sigue siendo** el máximo de silueta, sin cambios de conclusión:
+
+| k | Silueta (antes) | Silueta (después) |
+|---|---|---|
+| 2 | — | 0,3557 |
+| **3** | **0,3782** | **0,3753** |
+| 4 | — | 0,3297 |
+
+**2) Ajuste de hiperparámetros** (`scripts/tune_rf.py`, `scoring=f1_macro`, 5 folds mensuales, 24 combinaciones, 149,3 s):
+
+| | Antes | Después |
+|---|---|---|
+| Mejores hiperparámetros | `n_estimators=300, max_depth=14, min_samples_leaf=5` | `n_estimators=300, max_depth=14, min_samples_leaf=3` |
+| F1 macro CV (media ± desv.) | 0,4415 ± 0,0178 | 0,4403 ± 0,0195 |
+
+`min_samples_leaf` pasa de 5 a 3 (`n_estimators`/`max_depth` no cambian): un modelo con hojas ligeramente más pequeñas vuelve a ser el mejor una vez excluidos los 1.761 registros de ajuste. **`DEFAULT_CLF_PARAMS` actualizado** (`scripts/train_kmeans_rf_prod.py`) y **pinning test actualizado con TDD** (`tests/test_rf_tuning.py::test_default_clf_params_are_the_tuned_values`: RED con la aserción `min_samples_leaf == 3` contra el valor viejo `5` → GREEN al actualizar la constante).
+
+**3) Evaluación del modelo** (`scripts/evaluate_model.py`):
+
+Clasificador (prueba, n=8.942 antes de la limpieza tenía n=9.578; distribución de clases similar):
+
+| Métrica | Antes | Después |
+|---|---|---|
+| F1 macro | 0,4606 | 0,4525 |
+| Accuracy balanceada | 0,5148 | 0,5016 |
+| Accuracy | 0,6831 | 0,6751 |
+| F1 ponderado | 0,7194 | 0,7083 |
+| F1 Reducir / Mantener / Reforzar | 0,80 / 0,10 / 0,48 | 0,79 / 0,08 / 0,49 |
+| Línea base "siempre Reducir" — F1 macro / acc. bal. / Accuracy | 0,2948 / 0,3333 / 79,30 % | 0,2930 / 0,3333 / 78,42 % |
+
+Ligero deterioro generalizado (menos de 1,2 puntos porcentuales en cada métrica): esperable, porque los 1.761 registros de ajuste creaban 1.761 observaciones "producto vende exactamente 12 unidades a 111 COP" artificialmente fáciles de clasificar de forma consistente; al quitarlas, el problema real (más ruidoso) queda mejor representado. **La conclusión no cambia**: el modelo sigue superando ampliamente a la línea base de clase mayoritaria en F1 macro y accuracy balanceada, y sigue por debajo en accuracy simple (mismo patrón que antes).
+
+Regresor (prueba, top 1.900 productos, n=5.038 antes → n=5.062 después):
+
+| Métrica | Modelo (antes) | Modelo (después) | Ingenuo (antes) | Ingenuo (después) | Media_3 (antes) | Media_3 (después) |
+|---|---|---|---|---|---|---|
+| MAE (COP) | 382.162 | 385.016 | 645.453 | 644.901 | 494.885 | 493.789 |
+| RMSE (COP) | 1.224.574 | 1.244.584 | 1.654.083* | 1.651.228 | 1.235.545* | 1.232.872 |
+| R² | 0,6150 | 0,6005 | 0,2976 | 0,2969 | 0,6081 | 0,6080 |
+| MASE | 0,8743 | 0,8887 | 1,4766 | 1,4885 | 1,1322 | 1,1397 |
+
+(*RMSE "antes" tomado de `compare_models.py`, no reportado en la entrada de evaluación original). **Cambio de conclusión parcial**: el modelo sigue superando a ambas líneas base en MAE y MASE (MASE < 1) y al ingenuo en todas las métricas, pero Media_3 pasa a tener RMSE y R² ligeramente mejores (RMSE 1.232.872 vs 1.244.584; R² 0,6080 vs 0,6005): Media_3 comete menos errores muy grandes, el modelo acierta mejor en el error típico.
+
+**4) Comparación de modelos** (`scripts/compare_models.py`, 214,1 s):
+
+Clasificador (n=8.942): Random Forest sigue ganando en F1 macro (0,4525 vs XGBoost 0,4451 vs mayoritaria 0,2930) y F1 ponderado; XGBoost sigue ganando por poco en accuracy balanceada (0,5116 vs 0,5016) — mismo patrón que antes, sin cambio de conclusión. Mejores hiperparámetros de XGBoost sin cambios: `learning_rate=0,05, max_depth=4, n_estimators=200`.
+
+Regresión A (prueba completa, top productos, n=5.038 antes → n=5.062 después): Random Forest gana a XGBoost e ingenuo en las 4 métricas (MAE 385.016 vs XGBoost 428.863, R² 0,6005 vs 0,4645, MASE 0,8887 vs 0,9899) y a Media_3 en MAE y MASE (493.789 / 1,1397), pero **Media_3 gana en RMSE y R²** (1.232.872 / 0,6080 vs 1.244.584 / 0,6005) — cambio de conclusión respecto de la versión anterior, donde RF ganaba las 4.
+
+Regresión B (muestra de 150 productos, semilla 42; n=348 filas antes → **n=371 filas después**, porque el universo de productos elegibles cambió tras la limpieza):
+
+| Métrica | RF | XGBoost | Ingenuo | Media_3 | ARIMA(1,1,1) | Prophet |
+|---|---|---|---|---|---|---|
+| MAE (COP) | **296.272** | 344.308 | 451.419 | 367.612 | 320.998 | 310.613 |
+| RMSE (COP) | 1.050.444 | 1.167.985 | 1.018.441 | **917.032** | 944.640 | 927.276 |
+| R² | 0,5085 | 0,3924 | 0,5380 | **0,6254** | 0,6025 | 0,6170 |
+| MASE | **0,6838** | 0,7947 | 1,0419 | 0,8485 | 0,7409 | 0,7169 |
+
+**CAMBIO DE CONCLUSIÓN a declarar honestamente**: antes de esta limpieza, Random Forest ganaba en las 4 métricas de la Regresión B (MAE 265.580, RMSE 741.062, R² 0,2462, MASE 0,6076, superando también a ARIMA y Prophet). **Después de excluir los ajustes de inventario, Random Forest sigue ganando en MAE y MASE** (las métricas que este trabajo usa como principales para el regresor, ver entradas anteriores), **pero el baseline Media_3 pasa a tener mejor RMSE y R² que Random Forest** en esta muestra de 150 productos (RMSE 917.032 vs 1.050.444; R² 0,6254 vs 0,5085). El mismo patrón aparece, más atenuado, en la Regresión A (conjunto de prueba completo): RF gana en MAE y MASE y Media_3 en RMSE y R². Como el RMSE y el R² penalizan con fuerza los errores muy grandes, la lectura es que RF tiene menor error típico y Media_3 menos errores extremos. La diferencia en Regresión B es atribuible al tamaño de muestra (150 productos, 371 filas) y a que la semilla 42 ahora sortea sobre un universo de productos distinto (5.074 en vez de 5.654); se reporta sin ocultarla, para el capítulo de resultados del documento final.
+
+**5) EDA** (`scripts/eda.py`, 15,9 s):
+
+| | Antes | Después |
+|---|---|---|
+| Productos distintos (tras limpieza) | 5.654 | 5.074 |
+| Producto-mes antes de completar calendario | 34.938 | 33.387 |
+| Producto-mes tras completar calendario | 100.937 | 99.765 |
+| Clase A / B / C (productos) | 532 (9,4 %) / 963 (17,0 %) / 4.159 (73,6 %) | 532 (10,5 %) / 960 (18,9 %) / 3.582 (70,6 %) |
+| Clase A / B / C (% de ventas) | 79,97 % / 15,02 % / 5,00 % | 79,99 % / 15,01 % / 5,01 % |
+| % producto-mes con venta cero | 65,39 % | 66,53 % |
+| Mediana / Q1 / Q3 de venta-cero por producto | 71,43 % / 50,00 % / 86,36 % | 76,47 % / 50,00 % / 88,89 % |
+
+El porcentaje de productos en clase C baja (menos productos "de relleno" sin ventas reales) y el share de meses en cero sube ligeramente (consistente con que los 580 productos que desaparecieron eran, por definición, los que menos historial real tenían). Los 3 segmentos de clúster (bajo volumen/precio, medio, alta rotación) se mantienen cualitativamente iguales, solo con índices de cluster reordenados por KMeans y valores medianos ligeramente distintos (p. ej. cluster de alta rotación: 339.500→353.114 COP, frecuencia mediana 11 sin cambios).
+
+**Figuras verificadas visualmente** (Read): `eda_ventas_mensuales.png`, `eda_estacionalidad.png`, `eda_pareto_abc.png`, `eda_distribucion_ventas.png` (pico de ~1,3 k COP ya no aparece), `outputs/figures/comparacion_modelos.png`, `matriz_confusion.png`, `real_vs_predicho.png`, `seleccion_k_kmeans.png` — todas renderizan correctamente. Nota cosmética preexistente (no introducida por este cambio, no corregida aquí): en `comparacion_modelos.png` la etiqueta roja "Pronóstico ingenuo (entrenamiento)" se superpone parcialmente con las marcas del eje X del panel de MASE.
+
+**Archivos modificados**: `src/ventas_forecast/data/cleaning.py` (nueva función `remove_bulk_adjustments` + método `DatasetCleaner.remove_bulk_adjustments`), `src/ventas_forecast/data/__init__.py` (export), `scripts/train_kmeans_rf_prod.py` (`DEFAULT_COL_MAP["date"]`, constructor `bulk_adjustment_min_products`, `self.cleaning_summary`, llamada en `load_and_clean()`, `DEFAULT_CLF_PARAMS` actualizado), `scripts/eda.py` (sección 1 reporta el ajuste excluido y los productos perdidos), `tests/test_bulk_adjustments.py` (nuevo), `tests/test_rf_tuning.py` (pinning test actualizado).
+
+---
+
 ## [EDA] - 2026-09-23
 
 ### Análisis exploratorio de datos (`src/ventas_forecast/eda.py`, `scripts/eda.py`)
@@ -71,7 +183,7 @@ Random Forest gana en todas las métricas. ARIMA(1,1,1) presenta 3 pronósticos 
 Los scripts `scripts/run_xgboost.py` y `scripts/run_prophet.py` usan datasets antiguos y quedan sustituidos por `scripts/compare_models.py` para la comparación del trabajo de grado.
 
 
-**Anomalía detectada (pendiente de decisión)**: el 19/02/2026, 1.761 productos distintos registran exactamente 12 unidades a 111 COP (1.332 COP cada uno) — el pico del histograma de distribución. Representa el 0,018 % de las ventas en pesos, pero ~5 % de los meses producto-mes con ventas; no parece una venta real (posible carga o ajuste de inventario).
+**Anomalía detectada — CONFIRMADA y excluida**: el 19/02/2026, 1.761 productos distintos registran exactamente 12 unidades a 111 COP (1.332 COP cada uno) — el pico del histograma de distribución. Representaba el 0,018 % de las ventas en pesos, pero ~5 % de los meses producto-mes con ventas. El dueño del negocio **CONFIRMÓ** que se trata de una carga/ajuste de inventario del sistema, no una venta real. Se excluyó del pipeline con una regla genérica (`remove_bulk_adjustments`) y se recalcularon k, hiperparámetros, evaluación, comparación y EDA — ver **[Limpieza] - 2026-09-23** (entrada más reciente, arriba) para la justificación del umbral, los resultados antes/después y si alguna conclusión cambió.
 
 ---
 

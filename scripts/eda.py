@@ -202,6 +202,25 @@ def main():
         + ("PARCIAL, termina el día " + str(ultimo_dia.day) if ultimo_mes_parcial
            else "completo")
     )
+    if model.cleaning_summary is not None:
+        resumen_ajuste = model.cleaning_summary
+        productos_perdidos = calidad["n_products"] - calendario_info["productos_antes"]
+        lineas.append(
+            "Ajuste masivo de inventario excluido (CONFIRMADO por el negocio, "
+            "ver CHANGELOG 2026-09-23 'Limpieza', remove_bulk_adjustments): "
+            f"{resumen_ajuste['rows_removed']:,} filas "
+            f"({resumen_ajuste['distinct_products']:,} productos distintos, "
+            f"{len(resumen_ajuste['affected_dates'])} fecha(s): "
+            f"{', '.join(resumen_ajuste['affected_dates'])}), "
+            f"${resumen_ajuste['cop_amount']:,.0f} COP — no es venta real."
+        )
+        lineas.append(
+            f"De esos {resumen_ajuste['distinct_products']:,} productos, "
+            f"{productos_perdidos:,} tenían ESA fila de ajuste como su ÚNICO "
+            "registro y por lo tanto desaparecen por completo del histórico "
+            f"limpio ({calidad['n_products']:,} productos crudos -> "
+            f"{calendario_info['productos_antes']:,} tras la limpieza)."
+        )
 
     lineas.append("")
     lineas.append("2. TAMAÑO DEL DATASET (agregación y completado de calendario)")

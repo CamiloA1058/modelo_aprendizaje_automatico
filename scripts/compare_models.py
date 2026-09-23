@@ -397,8 +397,8 @@ def build_figure(res_clf, res_reg_b, salida):
     modelos_clf = list(res_clf.keys())
     x = np.arange(len(modelos_clf))
     ancho = 0.35
-    color_f1 = "#1D4ED8"
-    color_bal = "#0F766E"
+    color_f1 = "#2a78d6"   # paleta categórica de referencia, posición 1
+    color_bal = "#eb6834"  # posición 2
 
     f1_macro = [res_clf[m]["f1_macro"] for m in modelos_clf]
     bal_acc = [res_clf[m]["balanced_accuracy"] for m in modelos_clf]
@@ -417,10 +417,13 @@ def build_figure(res_clf, res_reg_b, salida):
     modelos_mase = sorted(res_reg_b.keys(), key=lambda m: res_reg_b[m]["mase"])
     valores_mase = [res_reg_b[m]["mase"] for m in modelos_mase]
 
-    ax2.barh(modelos_mase, valores_mase, color="#1D4ED8")
-    ax2.axvline(1.0, color="#DC2626", linestyle="--", linewidth=1.5)
-    ax2.text(1.0, -0.6, "Pronóstico ingenuo (entrenamiento)",
-             color="#DC2626", ha="center", va="top", fontsize=9)
+    ax2.barh(modelos_mase, valores_mase, color="#2a78d6")
+    # Línea de referencia en tinta neutra (el rojo queda reservado para
+    # estados); su etiqueta va arriba del panel para no chocar con el eje X.
+    ax2.axvline(1.0, color="#52514e", linestyle="--", linewidth=1.2)
+    ax2.set_ylim(-0.6, len(modelos_mase) - 0.1)
+    ax2.text(1.0, len(modelos_mase) - 0.2, " MASE = 1: pronóstico ingenuo\n (entrenamiento)",
+             color="#52514e", ha="left", va="top", fontsize=8.5)
     ax2.set_xlabel("MASE (muestra de productos)")
     ax2.set_title("Regresión — MASE por modelo (menor es mejor)")
     ax2.grid(True, axis="x", alpha=.3)

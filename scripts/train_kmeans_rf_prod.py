@@ -42,10 +42,14 @@ from sklearn.metrics import (
     balanced_accuracy_score,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from ventas_forecast.data.cleaning import remove_bulk_adjustments  # noqa: E402
+
 # ── Nombres de columna por defecto ────────────────────────────────────────────
 DEFAULT_COL_MAP = {
     "id":          "CODIGO",
     "description": "DESCRIPCION",
+    "date":        "FECHA",
     "year":        "ANIO",
     "month":       "MES",
     "sales":       "VENTAS",
@@ -60,11 +64,14 @@ DEFAULT_COL_MAP = {
 # con scoring="f1_macro" (ver CHANGELOG 2026-09-23 "métrica macro"): al
 # seleccionar por F1 macro en vez de F1 ponderado, max_depth pasa de None a
 # 14 y min_samples_leaf de 1 a 5 (un modelo algo menos profundo/más regular
-# generaliza mejor en las clases minoritarias Mantener/Reforzar).
+# generaliza mejor en las clases minoritarias Mantener/Reforzar). Reajustados
+# de nuevo tras excluir los ajustes masivos de inventario (ver CHANGELOG
+# 2026-09-23 "Limpieza"): min_samples_leaf pasa de 5 a 3 (n_estimators y
+# max_depth no cambian).
 DEFAULT_CLF_PARAMS = {
     "n_estimators": 300,
     "max_depth": 14,
-    "min_samples_leaf": 5,
+    "min_samples_leaf": 3,
 }
 
 # Grilla por defecto para tune_classifier() (GridSearchCV)
@@ -102,6 +109,15 @@ class SalesForecastModel:
                           que sobreescriben DEFAULT_CLF_PARAMS (n_estimators,
                           max_depth, min_samples_leaf). Ver también
                           tune_classifier() para ajustarlos con GridSearchCV.
+    bulk_adjustment_min_products : mínimo de productos DISTINTOS que deben
+                          compartir la misma combinación (fecha, cantidad,
+                          precio) para tratarla como ajuste masivo de
+                          inventario y excluirla en load_and_clean() (ver
+                          remove_bulk_adjustments en
+                          src/ventas_forecast/data/cleaning.py; CONFIRMADO
+                          por el negocio el caso del 19/02/2026). Default
+                          100 (conservador, ver CHANGELOG 2026-09-23
+                          "Limpieza"). None desactiva la regla.
     """
 
     def __init__(
@@ -121,6 +137,7 @@ class SalesForecastModel:
         numeric_fmt="dot_comma",
         min_months=6,
         clf_params=None,
+        bulk_adjustment_min_products=100,
     ):
         self.filepath        = Path(filepath)
         self.sep             = sep
@@ -140,9 +157,11 @@ class SalesForecastModel:
         self.numeric_fmt     = numeric_fmt
         self.min_months      = min_months
         self.clf_params      = {**DEFAULT_CLF_PARAMS, **(clf_params or {})}
+        self.bulk_adjustment_min_products = bulk_adjustment_min_products
 
         # Estado interno
         self.df           = None   # historial completo
+        self.cleaning_summary = None  # resumen de remove_bulk_adjustments (load_and_clean)
         self.df_predict   = None   # filas del último mes (para predecir)
         self.scaler       = RobustScaler()
         self.cluster_scaler = RobustScaler()  # escalador exclusivo del clustering
@@ -189,6 +208,28 @@ class SalesForecastModel:
 
         for role in ("sales", "total_sold", "avg_price"):
             self.df[c(role)] = self._parse_numeric(self.df[c(role)])
+
+        # Ajustes masivos de inventario (HALLAZGO/CONFIRMADO 2026-09-23, ver
+        # remove_bulk_adjustments): se aplican a nivel de FILA cruda, antes
+        # de agregar a producto-mes, porque el ajuste se detecta por
+        # combinación (fecha, cantidad, precio) DIARIA — a nivel mensual
+        # varios productos legítimos podrían coincidir por casualidad.
+        if self.bulk_adjustment_min_products is not None:
+            self.df, self.cleaning_summary = remove_bulk_adjustments(
+                self.df,
+                date_col=c("date"),
+                id_col=c("id"),
+                qty_col=c("sales"),
+                price_col=c("avg_price"),
+                min_products=self.bulk_adjustment_min_products,
+            )
+            print(
+                f"[✓] Ajustes masivos de inventario excluidos: "
+                f"{self.cleaning_summary['rows_removed']:,} filas "
+                f"({self.cleaning_summary['distinct_products']:,} productos, "
+                f"{len(self.cleaning_summary['affected_dates'])} fecha(s), "
+                f"${self.cleaning_summary['cop_amount']:,.0f} COP)"
+            )
 
         self.df[c("year")] = (
             self.df[c("year")].astype(str)
