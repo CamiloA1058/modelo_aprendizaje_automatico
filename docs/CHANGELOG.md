@@ -1,5 +1,54 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Comparación] - 2026-09-23
+
+### Comparación justa de modelos sobre V5 (`scripts/compare_models.py`, `src/ventas_forecast/benchmarks.py`)
+
+**Condiciones de equidad**: misma partición temporal 80/20 por producto, mismas filas de prueba y mismas métricas para todos los modelos.
+- Clasificación: Random Forest vs XGBoost vs clase mayoritaria. XGBoost se ajustó con GridSearchCV sobre los mismos pliegues mensuales y F1 macro, con pesos de clase balanceados (mejor: `learning_rate=0.05, max_depth=4, n_estimators=200`).
+- Regresión A: las 5.038 filas de prueba de los productos principales. El regresor XGBoost no se ajustó (`n_estimators=400, max_depth=6, learning_rate=0.05`).
+- Regresión B: muestra semillada de 150 productos (348 filas) para incluir Prophet y ARIMA(1,1,1), que se re-entrenan mes a mes con pronóstico a un paso (nunca ven el mes que pronostican). Respaldo ingenuo cuando el historial tiene menos de 6 meses: 9 filas en cada modelo.
+
+**Corrección previa en Prophet**: la estacionalidad anual automática (se activa con ~2 años de datos) sobreajustaba series intermitentes y disparaba el pronóstico (hasta 4,2e10 frente a un máximo histórico de 1,3e6; MAE 122.510.008). Se desactivó (`yearly_seasonality=False`); prueba de regresión con la serie real del producto 1185.
+
+**1) Clasificador (prueba, n = 9.578)**
+
+| Métrica | Random Forest | XGBoost | Clase mayoritaria |
+|---|---|---|---|
+| F1 macro | **0,4606** | 0,4454 | 0,2948 |
+| Accuracy balanceada | 0,5148 | **0,5185** | 0,3333 |
+| Accuracy | 0,6831 | 0,6276 | 0,7930 |
+| F1 ponderado | **0,7194** | 0,6905 | 0,7014 |
+| F1 Reducir / Mantener / Reforzar | 0,80 / 0,10 / 0,48 | 0,76 / 0,10 / 0,47 | 0,88 / 0 / 0 |
+
+Random Forest gana en F1 macro y F1 ponderado; XGBoost gana por poco en accuracy balanceada (+0,4 puntos). Ambos superan ampliamente a la clase mayoritaria en las métricas principales.
+
+**2) Regresión A (prueba, n = 5.038)**
+
+| Métrica | Random Forest | XGBoost | Ingenuo | Media 3 meses |
+|---|---|---|---|---|
+| MAE (COP) | **382.162** | 432.310 | 645.453 | 494.885 |
+| RMSE (COP) | **1.224.574** | 1.441.172 | 1.654.083 | 1.235.545 |
+| R² | **0,6150** | 0,4668 | 0,2976 | 0,6081 |
+| MASE | **0,8743** | 0,9890 | 1,4766 | 1,1322 |
+
+Random Forest gana en todas las métricas (XGBoost sin ajuste de hiperparámetros).
+
+**3) Regresión B (muestra, n = 348)**
+
+| Métrica | Random Forest | XGBoost | Ingenuo | Media 3 meses | ARIMA(1,1,1) | Prophet |
+|---|---|---|---|---|---|---|
+| MAE (COP) | **265.580** | 299.317 | 511.078 | 401.546 | 477.056 | 364.878 |
+| RMSE (COP) | **741.062** | 763.001 | 1.010.047 | 790.182 | 1.782.513 | 1.018.184 |
+| R² | **0,2462** | 0,2009 | −0,4004 | 0,1429 | −3,3615 | −0,4231 |
+| MASE | **0,6076** | 0,6848 | 1,1692 | 0,9186 | 1,0914 | 0,8347 |
+
+Random Forest gana en todas las métricas. ARIMA(1,1,1) presenta 3 pronósticos disparados en productos con historial corto (9 a 13 meses); sin esos 3 casos su MAE sería 353.010, y Random Forest seguiría siendo el mejor. No se recortaron sus predicciones.
+
+Los scripts `scripts/run_xgboost.py` y `scripts/run_prophet.py` usan datasets antiguos y quedan sustituidos por `scripts/compare_models.py` para la comparación del trabajo de grado.
+
+---
+
 ## [Mejora] - 2026-09-23 (métrica macro)
 
 ### Selección de hiperparámetros y métricas principales del clasificador: F1 macro / accuracy balanceada en vez de F1 ponderado / accuracy
