@@ -44,9 +44,10 @@ def main():
     print("\n===== Ajustando hiperparámetros (GridSearchCV) =====")
     best_params = model.tune_classifier()
 
+    scoring = "f1_macro"  # DECIDIDO por el usuario: ver tune_classifier()
     fila_mejor = model.tuning_results.iloc[0]
-    mejor_cv_f1_mean = fila_mejor["mean_test_score"]
-    mejor_cv_f1_std = fila_mejor["std_test_score"]
+    mejor_cv_score_mean = fila_mejor["mean_test_score"]
+    mejor_cv_score_std = fila_mejor["std_test_score"]
 
     # ── Reentrenar con los mejores hiperparámetros ───────────────────────────
     print("\n===== Entrenando con hiperparámetros ajustados =====")
@@ -65,16 +66,27 @@ def main():
     lineas.append("=" * 60)
     lineas.append(f"Hiperparámetros por defecto: {params_default}")
     lineas.append(f"Mejores hiperparámetros:     {best_params}")
+    lineas.append(f"Scoring usado en GridSearchCV: {scoring}")
     lineas.append(
-        f"F1 ponderado en validación cruzada (media ± desv.): "
-        f"{mejor_cv_f1_mean:.4f} ± {mejor_cv_f1_std:.4f}"
+        f"{scoring} en validación cruzada (media ± desv.): "
+        f"{mejor_cv_score_mean:.4f} ± {mejor_cv_score_std:.4f}"
     )
     lineas.append("")
-    lineas.append("Métricas de prueba (holdout) — promedio ponderado")
-    lineas.append(f"{'Métrica':<12}{'Por defecto':<15}{'Ajustado':<15}")
+    lineas.append("Métricas de prueba (holdout) — principales (desbalance de clases)")
+    lineas.append(f"{'Métrica':<20}{'Por defecto':<15}{'Ajustado':<15}")
+    for k, etiqueta in (
+        ("f1_macro", "F1 macro"),
+        ("balanced_accuracy", "Acc. balanceada"),
+    ):
+        lineas.append(
+            f"{etiqueta:<20}{metricas_default[k]:<15.4f}{metricas_tuned[k]:<15.4f}"
+        )
+    lineas.append("")
+    lineas.append("Métricas de prueba (holdout) — ponderadas por soporte (referencia)")
+    lineas.append(f"{'Métrica':<20}{'Por defecto':<15}{'Ajustado':<15}")
     for k in ("accuracy", "precision", "recall", "f1"):
         lineas.append(
-            f"{k.capitalize():<12}{metricas_default[k]:<15.4f}{metricas_tuned[k]:<15.4f}"
+            f"{k.capitalize():<20}{metricas_default[k]:<15.4f}{metricas_tuned[k]:<15.4f}"
         )
     lineas.append("")
     lineas.append(f"Tiempo total: {elapsed:.1f} s")

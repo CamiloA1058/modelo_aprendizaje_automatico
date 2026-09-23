@@ -39,6 +39,7 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
     f1_score, classification_report, silhouette_score,
     mean_absolute_error, mean_squared_error, r2_score,
+    balanced_accuracy_score,
 )
 
 # ── Nombres de columna por defecto ────────────────────────────────────────────
@@ -56,12 +57,14 @@ DEFAULT_COL_MAP = {
 # ── Hiperparámetros del clasificador (RandomForest) ──────────────────────────
 # Valores seleccionados con tune_classifier() (GridSearchCV + TimeSeriesSplit
 # mensual) sobre Query_Result_V5.csv; ver scripts/tune_rf.py. Re-ajustados
-# tras el completado de calendario (ver CHANGELOG 2026-09-23): max_depth pasa
-# de 14 a None (sin límite de profundidad).
+# con scoring="f1_macro" (ver CHANGELOG 2026-09-23 "métrica macro"): al
+# seleccionar por F1 macro en vez de F1 ponderado, max_depth pasa de None a
+# 14 y min_samples_leaf de 1 a 5 (un modelo algo menos profundo/más regular
+# generaliza mejor en las clases minoritarias Mantener/Reforzar).
 DEFAULT_CLF_PARAMS = {
     "n_estimators": 300,
-    "max_depth": None,
-    "min_samples_leaf": 1,
+    "max_depth": 14,
+    "min_samples_leaf": 5,
 }
 
 # Grilla por defecto para tune_classifier() (GridSearchCV)
@@ -536,15 +539,31 @@ class SalesForecastModel:
         pred = self.clf.predict(X_te)
 
         self.metrics = {
+            # Ponderadas por soporte de clase (mantenidas por compatibilidad:
+            # scripts/app.py las lee tal cual). Bajo el desbalance de clases
+            # de este problema (Reducir 79,30 % de la prueba) el promedio
+            # ponderado —y sobre todo accuracy— está dominado por la clase
+            # mayoritaria y puede mejorar aunque el modelo empeore en
+            # Mantener/Reforzar; ver f1_macro/balanced_accuracy más abajo.
             "accuracy":  round(accuracy_score(y_te, pred), 4),
             "precision": round(precision_score(y_te, pred, average="weighted", zero_division=0), 4),
             "recall":    round(recall_score(y_te, pred, average="weighted", zero_division=0), 4),
             "f1":        round(f1_score(y_te, pred, average="weighted", zero_division=0), 4),
+            # Métricas principales bajo desbalance de clases (DECIDIDO por el
+            # usuario, ver CHANGELOG 2026-09-23 "métrica macro"): f1_macro
+            # promedia el F1 de cada clase con el mismo peso (no por soporte),
+            # y balanced_accuracy es el promedio del recall de cada clase;
+            # ambas penalizan un modelo que solo acierta en "Reducir".
+            "f1_macro":          round(f1_score(y_te, pred, average="macro", zero_division=0), 4),
+            "balanced_accuracy": round(balanced_accuracy_score(y_te, pred), 4),
         }
 
         print("\n===== MÉTRICAS DE VALIDACIÓN =====")
-        for k, v in self.metrics.items():
-            print(f"  {k.capitalize():<10}: {v:.2%}")
+        for k in ("accuracy", "precision", "recall", "f1"):
+            print(f"  {k.capitalize():<10}: {self.metrics[k]:.2%}")
+        print("  --- Métricas principales (desbalance de clases) ---")
+        print(f"  {'F1 macro':<18}: {self.metrics['f1_macro']:.2%}")
+        print(f"  {'Bal. accuracy':<18}: {self.metrics['balanced_accuracy']:.2%}")
         print("\n", classification_report(y_te, pred, labels=[0, 1, 2],
               target_names=["Reducir", "Mantener", "Reforzar"], zero_division=0))
 
@@ -586,13 +605,22 @@ class SalesForecastModel:
 
         return folds
 
-    def tune_classifier(self, param_grid=None, n_splits=5, scoring="f1_weighted"):
+    def tune_classifier(self, param_grid=None, n_splits=5, scoring="f1_macro"):
         """
         Ajusta los hiperparámetros del RandomForestClassifier con GridSearchCV,
         usando validación cruzada temporal (TimeSeriesSplit por mes, ver
         _monthly_time_series_folds) sobre la partición de ENTRENAMIENTO
         únicamente (self._train_idx): las filas de prueba nunca participan en
         la selección de hiperparámetros.
+
+        scoring por defecto "f1_macro" (DECIDIDO por el usuario, ver
+        CHANGELOG 2026-09-23 "métrica macro"): promedia el F1 de cada clase
+        con el mismo peso, sin importar su soporte. Con el desbalance de
+        clases de este problema (Reducir ~79 % de la prueba tras el
+        completado de calendario), "f1_weighted" —el valor anterior—
+        recompensa sobre todo acertar en la clase mayoritaria y puede elegir
+        hiperparámetros que ignoran Mantener/Reforzar; f1_macro exige acertar
+        también en las clases minoritarias.
 
         El estimador es un Pipeline (RobustScaler + RandomForestClassifier)
         para que el escalador se reajuste en cada fold con sus propias filas

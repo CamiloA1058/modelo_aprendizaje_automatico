@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 
 from sklearn.metrics import (
     accuracy_score, f1_score, classification_report, confusion_matrix,
+    balanced_accuracy_score,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -72,7 +73,16 @@ def main():
     baseline_clf = {
         "accuracy": round(accuracy_score(y_te, pred_mayoritaria), 4),
         "f1": round(f1_score(y_te, pred_mayoritaria, average="weighted", zero_division=0), 4),
+        # f1_macro y balanced_accuracy de la línea base: con una sola clase
+        # predicha, ambas colapsan al F1/recall de esa clase promediado con
+        # 0 en las demás (ver nota de desbalance más abajo).
+        "f1_macro": round(f1_score(y_te, pred_mayoritaria, average="macro", zero_division=0), 4),
+        "balanced_accuracy": round(balanced_accuracy_score(y_te, pred_mayoritaria), 4),
     }
+
+    # Distribución de clases de la prueba: sustenta la nota de desbalance
+    # (accuracy y f1_weighted están dominados por la clase mayoritaria).
+    distribucion_test = y_te.value_counts().reindex([0, 1, 2], fill_value=0)
 
     # ── Regresor: métricas ya calculadas en train_regressor() ───────────────
     reg_metrics = model.reg_metrics
@@ -84,18 +94,40 @@ def main():
     lineas.append("=" * 60)
 
     lineas.append("")
-    lineas.append("CLASIFICADOR — métricas de prueba (promedio ponderado)")
+    lineas.append("CLASIFICADOR — métricas de prueba")
     lineas.append("-" * 60)
-    for k, v in model.metrics.items():
-        lineas.append(f"  {k.capitalize():<10}: {v:.4f}")
+    lineas.append("Métricas principales (robustas al desbalance de clases):")
+    lineas.append(f"  F1 macro          : {model.metrics['f1_macro']:.4f}")
+    lineas.append(f"  Accuracy balanceada: {model.metrics['balanced_accuracy']:.4f}")
+    lineas.append("")
+    lineas.append("Métricas ponderadas por soporte de clase (referencia):")
+    for k in ("accuracy", "precision", "recall", "f1"):
+        lineas.append(f"  {k.capitalize():<10}: {model.metrics[k]:.4f}")
+    lineas.append("")
+    lineas.append(
+        f"Distribución de clases en la prueba (n={len(y_te):,}): "
+        + ", ".join(
+            f"{CLASS_NAMES[cls]} {cnt:,} ({cnt / len(y_te):.2%})"
+            for cls, cnt in distribucion_test.items()
+        )
+    )
+    lineas.append(
+        "Nota: la accuracy (y el F1 ponderado) por sí solos engañan bajo "
+        "este desbalance — un modelo que SIEMPRE prediga la clase "
+        "mayoritaria ('Reducir') ya obtiene una accuracy alta (ver línea "
+        "base abajo); por eso F1 macro y accuracy balanceada son las "
+        "métricas principales de este reporte."
+    )
     lineas.append("")
     lineas.append(
         f"Línea base de clase mayoritaria (siempre predice "
         f"'{CLASS_NAMES[clase_mayoritaria]}', clase más frecuente en "
         f"entrenamiento):"
     )
-    lineas.append(f"  Accuracy  : {baseline_clf['accuracy']:.4f}")
-    lineas.append(f"  F1        : {baseline_clf['f1']:.4f}")
+    lineas.append(f"  F1 macro           : {baseline_clf['f1_macro']:.4f}")
+    lineas.append(f"  Accuracy balanceada: {baseline_clf['balanced_accuracy']:.4f}")
+    lineas.append(f"  Accuracy           : {baseline_clf['accuracy']:.4f}")
+    lineas.append(f"  F1 (ponderado)     : {baseline_clf['f1']:.4f}")
 
     lineas.append("")
     lineas.append("Reporte de clasificación (prueba):")

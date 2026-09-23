@@ -1,5 +1,52 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Mejora] - 2026-09-23 (métrica macro)
+
+### Selección de hiperparámetros y métricas principales del clasificador: F1 macro / accuracy balanceada en vez de F1 ponderado / accuracy
+
+**Por qué**: tras el completado de calendario (ver entrada anterior), la partición de prueba del clasificador queda muy desbalanceada — Reducir 7.595 filas (79,30 %), Reforzar 1.646 (17,19 %), Mantener 337 (3,52 %). Con ese desbalance, `tune_classifier(scoring="f1_weighted")` (el valor previo) selecciona hiperparámetros que maximizan el F1 ponderado por soporte, dominado por la clase mayoritaria "Reducir"; y reportar solo accuracy/F1 ponderado es engañoso: la línea base ingenua "siempre predecir Reducir" obtenía **Accuracy 79,30 %** y **F1 ponderado 70,14 %**, ambos por encima o cerca del clasificador entrenado (Acc 72,84 %, F1 74,26 %), pese a que esa línea base tiene macro F1 ≈ 0,29 (no distingue Mantener ni Reforzar en absoluto). DECIDIDO por el usuario: seleccionar hiperparámetros con **F1 macro** (promedia el F1 de cada clase con el mismo peso, sin importar su soporte) y reportar **F1 macro y accuracy balanceada** como métricas principales del clasificador; accuracy y F1 ponderado se conservan en los reportes como referencia, con una nota explicando por qué no bastan solas bajo este desbalance.
+
+**Cambios**:
+- `scripts/train_kmeans_rf_prod.py`:
+  - `tune_classifier()`: `scoring` por defecto pasa de `"f1_weighted"` a `"f1_macro"` (parámetro explícito, se puede seguir pasando otro valor). Docstring actualizado explicando la razón del cambio.
+  - `train_classifier()`: `self.metrics` conserva sus claves existentes (`accuracy`, `precision`, `recall`, `f1` — leídas sin cambios por `scripts/app.py`) y agrega `f1_macro` (`f1_score(average="macro", zero_division=0)`) y `balanced_accuracy` (`balanced_accuracy_score`), redondeadas a 4 decimales; se imprimen junto a las demás.
+  - `DEFAULT_CLF_PARAMS`: recalculado con `tune_classifier(scoring="f1_macro")` sobre `Query_Result_V5.csv` (ver tabla de tuning abajo). `max_depth` pasa de `None` a `14` y `min_samples_leaf` de `1` a `5` (un modelo algo menos profundo y con hojas más grandes generaliza mejor en las clases minoritarias Mantener/Reforzar bajo este criterio).
+- `scripts/evaluate_model.py`: la sección del clasificador muestra primero las métricas principales (F1 macro, accuracy balanceada), luego las ponderadas como referencia, la distribución de clases de la prueba, y una nota explicando por qué accuracy sola engaña bajo el desbalance. La línea base de clase mayoritaria ahora también reporta F1 macro y accuracy balanceada (además de accuracy y F1 ponderado, que se conservan).
+- `scripts/tune_rf.py`: el resumen muestra el `scoring` usado por `GridSearchCV` (`f1_macro`), su media ± desviación en validación cruzada, y compara por defecto vs. ajustado tanto en F1 macro/accuracy balanceada (principal) como en las métricas ponderadas (referencia).
+
+**Pruebas nuevas/actualizadas** (TDD, `tests/test_rf_tuning.py`):
+- `test_default_scoring_is_f1_macro` / `test_explicit_scoring_overrides_default`: espían la llamada a `GridSearchCV` (mock sobre `train_kmeans_rf_prod.GridSearchCV`) para verificar que `tune_classifier()` usa `scoring="f1_macro"` por defecto y respeta un `scoring` explícito.
+- `ClassifierMetricsTest`: `self.metrics` conserva las claves ponderadas existentes y agrega `f1_macro`/`balanced_accuracy` con valores iguales a los calculados independientemente por `sklearn` sobre las mismas predicciones de prueba.
+- `test_default_clf_params_are_the_tuned_values` (pinning test) y `test_custom_clf_params_are_applied_to_classifier`: actualizados (RED→GREEN) para los nuevos valores de `DEFAULT_CLF_PARAMS` (`max_depth=14`, `min_samples_leaf=5`).
+
+**Resultados reales** (`scripts/tune_rf.py`, `scripts/evaluate_model.py` sobre `Query_Result_V5.csv`, misma partición temporal 80/20 por producto; 24 combinaciones evaluadas, 5 folds mensuales, scoring=f1_macro, 154,8 s):
+
+- Mejores hiperparámetros: `n_estimators=300, max_depth=14, min_samples_leaf=5` (antes: `max_depth=None, min_samples_leaf=1`).
+- F1 macro en validación cruzada (media ± desviación): **0,4415 ± 0,0178**.
+
+Clasificador (prueba, n=9.578 — Reducir 7.595 / Mantener 337 / Reforzar 1.646):
+
+| Métrica | Anterior (max_depth=None, min_samples_leaf=1) | Nuevo (max_depth=14, min_samples_leaf=5) |
+|---|---|---|
+| Accuracy | 72,84 % | 68,31 % |
+| Accuracy balanceada | 48,73 % | **51,48 %** |
+| F1 (ponderado) | 74,26 % | 71,94 % |
+| F1 macro | 45,27 % | **46,06 %** |
+
+Por clase F1 (prueba):
+
+| Clase | Anterior | Nuevo |
+|---|---|---|
+| Reducir | 0,83 | 0,80 |
+| Mantener | 0,05 | 0,10 |
+| Reforzar | 0,48 | 0,48 |
+
+Línea base "siempre Reducir" (clase mayoritaria de entrenamiento): Accuracy 79,30 %, F1 ponderado 70,14 %, **F1 macro 29,48 %**, **accuracy balanceada 33,33 %**.
+
+**El modelo ajustado supera la línea base en F1 macro (46,06 % vs. 29,48 %) y en accuracy balanceada (51,48 % vs. 33,33 %), pero sigue por debajo en accuracy simple (68,31 % vs. 79,30 %)** — esperado y consistente con la razón del cambio: la línea base gana en accuracy únicamente porque ignora por completo las clases minoritarias, que es justo lo que F1 macro/accuracy balanceada penalizan y lo que el modelo, aunque de forma modesta, sí logra distinguir (recall de Mantener y Reforzar sube frente a la línea base, que tiene recall 0 en ambas). La clase "Mantener" sigue siendo la más débil del modelo (F1 0,10, 337 casos), aunque mejora respecto al ajuste anterior (0,05).
+
+El regresor no depende del clasificador y sus métricas no cambian: MAE 382.161,91, R² 0,6150, MASE 0,8743 (ver `outputs/reports/evaluacion_modelo.txt`).
+
 ## [Corrección] - 2026-09-23
 
 ### Fuga de calendario: `shift()`/`rolling()` operaban por fila, no por mes calendario
