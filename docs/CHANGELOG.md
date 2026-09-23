@@ -1,5 +1,57 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Corrección] - 2026-09-22 (regresor)
+
+### Fuga de datos en el regresor + métricas de regresión (MAE, RMSE, R², MASE) y baselines
+
+**Problema**: `train_regressor()` seleccionaba `self._top_prods` (los `top_n_products` con más ventas) sumando `TOTAL_VENDIDO` sobre **todas** las filas de `_df_train`, incluyendo la partición de prueba, y luego entrenaba el `RandomForestRegressor` con **todas** esas filas (entrenamiento + prueba). El regresor nunca se evaluaba: no había MAE, MSE, RMSE, R² ni MASE, ni una línea base ingenua con la que compararlo (pendiente técnico señalado en la auditoría de 2026-09-22, ver `CLAUDE.md`).
+
+**Cambio** (`scripts/train_kmeans_rf_prod.py`):
+- `_top_prods` ahora se calcula únicamente con `self._df_train.loc[self._train_idx]` (partición de entrenamiento).
+- El `RandomForestRegressor` se entrena únicamente con filas de entrenamiento de esos top productos (`target > 0`), sobre `self.scaler.transform(X)` y `log1p(target)`, igual que antes.
+- Se evalúa en la partición de **prueba** de los mismos productos: predicciones revertidas a escala original con `expm1`. Se guarda `self.reg_metrics` (`mae`, `mse`, `rmse`, `r2`, `mase`, `n_test`) y `self.reg_test_results` (real vs. predicho, para graficar).
+- **Definición de MASE**: `mase = mae_modelo / escala`, donde `escala = media(|target − TOTAL_VENDIDO|)` del pronóstico ingenuo (el mes actual predice el mes siguiente) calculada **solo sobre la partición de entrenamiento** de los top productos (no sobre prueba, para no filtrar información de prueba en la escala de referencia).
+- Se agregan dos baselines evaluados sobre las mismas filas de prueba, guardados en `self.baseline_metrics`:
+  - `ingenuo`: predice el mes siguiente igual al `TOTAL_VENDIDO` del mes actual.
+  - `media_3`: predice la media móvil de 3 meses **incluyendo el mes actual** (columna nueva `media_3_actual`, sin `shift`; distinta de `mean_3`, que sí lleva `shift(1)` y se usa como feature del modelo). Si un producto no tiene historial suficiente (`NaN`), se usa el valor ingenuo como respaldo para esa fila.
+- Nuevo script `scripts/evaluate_model.py`: corre el pipeline hasta `train_regressor()` sobre `Query_Result_V5.csv`, exporta `outputs/reports/evaluacion_modelo.txt` (métricas del clasificador + línea base de clase mayoritaria + matriz de confusión + tabla de regresión), `outputs/figures/matriz_confusion.png` y `outputs/figures/real_vs_predicho.png` (dispersión real vs. predicho, escala log-log).
+- Tests nuevos en `tests/test_regression_metrics.py` (8 casos): verifican que el ajuste del regresor no usa filas de prueba (espiando `RandomForestRegressor.fit`), que `reg_metrics` tiene las claves esperadas con valores finitos y `rmse == sqrt(mse)`, que el MASE coincide con `mae / escala` calculada de forma independiente sobre entrenamiento, que el baseline `ingenuo` es coherente con un cálculo independiente sobre prueba, y que `_top_prods` ignora las filas de prueba (caso construido: se infla artificialmente `TOTAL_VENDIDO` solo en las filas de prueba de un producto para comprobar que NO pasa a ser top si la selección es correcta).
+
+**Resultado sobre `Query_Result_V5.csv`** (`scripts/evaluate_model.py`, top 1900 productos, 16.368 filas de entrenamiento / 5.077 de prueba para el regresor):
+
+Clasificador (prueba, promedio ponderado) — sin cambios respecto al ajuste de hiperparámetros ya adoptado:
+
+| Métrica | Modelo | Línea base (clase mayoritaria = "Reforzar") |
+|---|---|---|
+| Accuracy | 64,12 % | 41,95 % |
+| Precision | 63,93 % | — |
+| Recall | 64,12 % | — |
+| F1 | 64,02 % | 24,79 % |
+
+Matriz de confusión (filas = real, columnas = predicha; orden Reducir/Mantener/Reforzar):
+
+```
+Reducir  : [2987,  176,  857]
+Mantener : [ 233,   98,  345]
+Reforzar : [ 903,  388, 2102]
+```
+
+Regresor (prueba, top productos, `n_test=5.077`):
+
+| Métrica | Modelo | Ingenuo | Media_3 |
+|---|---|---|---|
+| MAE | 460.968,18 | 616.270,36 | 531.697,06 |
+| MSE | 1.659.832.486.940,06 | 2.651.254.383.132,88 | 1.772.192.485.460,91 |
+| RMSE | 1.288.344,86 | 1.628.267,29 | 1.331.237,20 |
+| R² | 0,6114 | 0,3793 | 0,5851 |
+| MASE | 1,0954 | 1,4645 | 1,2635 |
+
+**El modelo supera a ambos baselines (ingenuo y media_3) en las cinco métricas** (menor MAE/MSE/RMSE/MASE, mayor R²) — dicho sin adornos, sí mejora frente a las líneas base ingenuas sobre la partición de prueba. El clasificador también supera ampliamente la línea base de clase mayoritaria (+22,2 puntos de accuracy, +39,2 puntos de F1 ponderado).
+
+**Limitación a documentar honestamente**: el MASE del modelo es **1,0954, mayor a 1**. Esto significa que, aunque el modelo comete menos error absoluto que los baselines *sobre la partición de prueba*, su error absoluto medio en prueba es ligeramente **mayor** que el error absoluto medio del pronóstico ingenuo observado *en entrenamiento* (la escala de MASE). Es decir, el desempeño del pronóstico ingenuo se degrada más entre entrenamiento y prueba que el del modelo, pero ninguno de los dos "gana" en términos absolutos frente al comportamiento histórico de entrenamiento. No se debe presentar el MASE < 1 como si el modelo superara al ingenuo en términos absolutos: la comparación válida contra baselines es la de la tabla anterior (mismas filas de prueba para los tres), donde el modelo sí gana en las cinco métricas.
+
+---
+
 ## [Mejora] - 2026-09-22 (adopción)
 
 ### Hiperparámetros ajustados como valores por defecto

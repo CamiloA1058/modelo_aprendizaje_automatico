@@ -38,6 +38,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
     f1_score, classification_report, silhouette_score,
+    mean_absolute_error, mean_squared_error, r2_score,
 )
 
 # ── Nombres de columna por defecto ────────────────────────────────────────────
@@ -145,6 +146,9 @@ class SalesForecastModel:
         self.reg          = None
         self.results      = None   # predicciones del mes siguiente
         self.metrics      = {}
+        self.reg_metrics      = {}   # métricas del regresor sobre prueba (train_regressor)
+        self.baseline_metrics = {}   # métricas de los baselines ingenuo/media_3 (train_regressor)
+        self.reg_test_results = None  # real vs predicho en prueba (train_regressor)
         self.tuning_results  = None   # tabla completa de GridSearchCV (tune_classifier)
         self.best_clf_params = None   # mejores hiperparámetros encontrados
         self._features    = None
@@ -232,6 +236,13 @@ class SalesForecastModel:
             lambda x: x.rolling(3).mean().shift(1))
         df["mean_6"] = df.groupby(c("id"))[c("total_sold")].transform(
             lambda x: x.rolling(6).mean().shift(1))
+
+        # Media móvil de 3 meses SIN shift (incluye el mes actual): se usa
+        # solo como baseline "media_3" en train_regressor() para comparar
+        # contra el regresor, NO como feature del modelo (a diferencia de
+        # mean_3, que sí lleva shift(1) y sirve como predictor).
+        df["media_3_actual"] = df.groupby(c("id"))[c("total_sold")].transform(
+            lambda x: x.rolling(3).mean())
 
         # Ratio de crecimiento
         df["growth_ratio"] = df["target"] / df[c("total_sold")]
@@ -560,27 +571,121 @@ class SalesForecastModel:
 
         return self.best_clf_params
 
+    # ── Helper compartido: métricas de regresión (modelo y baselines) ────────
+    @staticmethod
+    def _regression_metrics(y_true, y_pred, scale):
+        """
+        Calcula MAE, MSE, RMSE, R2 y MASE (con la escala de MASE ya calculada
+        aparte, ver train_regressor) para un conjunto de predicciones.
+        Redondea a 4 decimales. Si la escala de MASE es 0, mase queda en NaN.
+        """
+        mae  = mean_absolute_error(y_true, y_pred)
+        mse  = mean_squared_error(y_true, y_pred)
+        rmse = np.sqrt(mse)
+        r2   = r2_score(y_true, y_pred) if len(y_true) > 1 else float("nan")
+        mase = (mae / scale) if scale else float("nan")
+
+        return {
+            "mae":    round(float(mae), 4),
+            "mse":    round(float(mse), 4),
+            "rmse":   round(float(rmse), 4),
+            "r2":     round(float(r2), 4),
+            "mase":   round(float(mase), 4) if not np.isnan(mase) else float("nan"),
+            "n_test": int(len(y_true)),
+        }
+
     # ── 6. REGRESOR ───────────────────────────────────────────────────────────
     def train_regressor(self):
+        """
+        Entrena el RandomForestRegressor SOLO con la partición de
+        entrenamiento (self._train_idx) de los top_n_products productos con
+        más ventas, para no filtrar información del conjunto de prueba (el
+        top de productos y el ajuste del modelo antes se calculaban sobre
+        TODAS las filas de _df_train, incluyendo prueba).
+
+        Evalúa en la partición de prueba de esos mismos productos (MAE, MSE,
+        RMSE, R2, MASE) y calcula los mismos baselines para dos pronósticos
+        ingenuos: "ingenuo" (ventas del mes actual) y "media_3" (media móvil
+        de 3 meses incluyendo el mes actual). Guarda self.reg_metrics y
+        self.baseline_metrics.
+        """
         c = self._c
+
+        # ── Top productos: SOLO con filas de entrenamiento ───────────────────
+        train_rows = self._df_train.loc[self._train_idx]
         self._top_prods = (
-            self._df_train.groupby(c("id"))[c("total_sold")]
+            train_rows.groupby(c("id"))[c("total_sold")]
             .sum().nlargest(self.top_n_products).index
         )
 
-        mask = (
-            self._df_train[c("id")].isin(self._top_prods) &
-            (self._df_train["target"] > 0)
-        )
-        df_reg = self._df_train[mask]
-        X_reg  = self._X.loc[df_reg.index]
-        y_reg  = np.log1p(df_reg["target"])
+        es_top       = self._df_train[c("id")].isin(self._top_prods)
+        tiene_target = self._df_train["target"] > 0
+        es_train     = self._df_train.index.isin(self._train_idx)
+        es_test      = self._df_train.index.isin(self._test_idx)
+
+        df_reg_train = self._df_train[es_train & es_top & tiene_target]
+        df_reg_test  = self._df_train[es_test & es_top & tiene_target]
+
+        # ── Entrenamiento (solo filas de entrenamiento) ──────────────────────
+        X_reg_train = self._X.loc[df_reg_train.index]
+        y_reg_train = np.log1p(df_reg_train["target"])
 
         self.reg = RandomForestRegressor(
             n_estimators=200, max_depth=12, random_state=42, n_jobs=-1,
         )
-        self.reg.fit(self.scaler.transform(X_reg), y_reg)
-        print(f"[✓] Regresor entrenado (top {self.top_n_products} productos)")
+        self.reg.fit(self.scaler.transform(X_reg_train), y_reg_train)
+
+        # ── Evaluación (solo filas de prueba) ────────────────────────────────
+        X_reg_test = self._X.loc[df_reg_test.index]
+        y_true     = df_reg_test["target"].to_numpy()
+        y_pred     = np.expm1(self.reg.predict(self.scaler.transform(X_reg_test)))
+
+        # Valores reales vs predichos de la prueba (top productos), para
+        # graficar en scripts/evaluate_model.py (real_vs_predicho.png).
+        self.reg_test_results = pd.DataFrame({
+            c("id"): df_reg_test[c("id")].to_numpy(),
+            "real":     y_true,
+            "predicho": y_pred,
+        })
+
+        # Escala de MASE: MAE del pronóstico ingenuo (mes actual predice el
+        # mes siguiente) calculada sobre la partición de ENTRENAMIENTO de los
+        # top productos, para no usar información de prueba en la escala.
+        naive_err_train = (
+            df_reg_train["target"] - df_reg_train[c("total_sold")]
+        ).abs()
+        scale = naive_err_train.mean()
+
+        self.reg_metrics = self._regression_metrics(y_true, y_pred, scale)
+
+        # ── Baselines sobre las mismas filas de prueba ───────────────────────
+        pred_ingenuo = df_reg_test[c("total_sold")].to_numpy()
+
+        # media_3 sin shift (incluye mes actual); si un producto no tiene
+        # suficiente historial (NaN, <3 meses), se usa el ingenuo como
+        # respaldo para esa fila.
+        pred_media_3 = df_reg_test["media_3_actual"].to_numpy()
+        pred_media_3 = np.where(np.isnan(pred_media_3), pred_ingenuo, pred_media_3)
+
+        self.baseline_metrics = {
+            "ingenuo": self._regression_metrics(y_true, pred_ingenuo, scale),
+            "media_3": self._regression_metrics(y_true, pred_media_3, scale),
+        }
+
+        print(f"[✓] Regresor entrenado (top {self.top_n_products} productos, "
+              f"{len(df_reg_train):,} filas de entrenamiento, "
+              f"{len(df_reg_test):,} filas de prueba)")
+
+        print("\n===== MÉTRICAS DE REGRESIÓN (prueba, top productos) =====")
+        print(f"{'Métrica':<10}{'Modelo':<14}{'Ingenuo':<14}{'Media_3':<14}")
+        for k in ("mae", "mse", "rmse", "r2", "mase"):
+            print(
+                f"{k.upper():<10}"
+                f"{self.reg_metrics[k]:<14}"
+                f"{self.baseline_metrics['ingenuo'][k]:<14}"
+                f"{self.baseline_metrics['media_3'][k]:<14}"
+            )
+        print(f"n_test: {self.reg_metrics['n_test']:,}")
 
     # ── 7. PREDICCIÓN REAL DEL MES SIGUIENTE ─────────────────────────────────
     def predict_next_month(self):
