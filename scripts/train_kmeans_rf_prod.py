@@ -33,6 +33,8 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import RobustScaler
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
     f1_score, classification_report, silhouette_score,
@@ -48,6 +50,22 @@ DEFAULT_COL_MAP = {
     "total_sold":  "TOTAL_VENDIDO",
     "avg_price":   "PRECIO_PROMEDIO",
     "frequency":   "FRECUENCIA",
+}
+
+# ── Hiperparámetros del clasificador (RandomForest) ──────────────────────────
+# Valores originales hardcodeados en train_classifier(); se usan como default
+# de self.clf_params para que el comportamiento no cambie si no se ajustan.
+DEFAULT_CLF_PARAMS = {
+    "n_estimators": 300,
+    "max_depth": 10,
+    "min_samples_leaf": 3,
+}
+
+# Grilla por defecto para tune_classifier() (GridSearchCV)
+DEFAULT_PARAM_GRID = {
+    "rf__n_estimators": [200, 300],
+    "rf__max_depth": [6, 10, 14, None],
+    "rf__min_samples_leaf": [1, 3, 5],
 }
 
 
@@ -74,6 +92,10 @@ class SalesForecastModel:
     train_ratio         : fracción entrenamiento (default 0.8)
     numeric_fmt         : 'dot_comma' | 'plain'
     min_months          : meses mínimos de historial para predecir (default 6)
+    clf_params          : dict con hiperparámetros del RandomForestClassifier
+                          que sobreescriben DEFAULT_CLF_PARAMS (n_estimators,
+                          max_depth, min_samples_leaf). Ver también
+                          tune_classifier() para ajustarlos con GridSearchCV.
     """
 
     def __init__(
@@ -92,6 +114,7 @@ class SalesForecastModel:
         train_ratio=0.8,
         numeric_fmt="dot_comma",
         min_months=6,
+        clf_params=None,
     ):
         self.filepath        = Path(filepath)
         self.sep             = sep
@@ -110,6 +133,7 @@ class SalesForecastModel:
         self.train_ratio     = train_ratio
         self.numeric_fmt     = numeric_fmt
         self.min_months      = min_months
+        self.clf_params      = {**DEFAULT_CLF_PARAMS, **(clf_params or {})}
 
         # Estado interno
         self.df           = None   # historial completo
@@ -121,10 +145,19 @@ class SalesForecastModel:
         self.reg          = None
         self.results      = None   # predicciones del mes siguiente
         self.metrics      = {}
+        self.tuning_results  = None   # tabla completa de GridSearchCV (tune_classifier)
+        self.best_clf_params = None   # mejores hiperparámetros encontrados
         self._features    = None
         self._top_prods   = None
         self._ultimo_mes  = None
         self._mes_pred    = None
+        # Poblados por prepare_split(): partición de entrenamiento/prueba
+        self._df_train    = None
+        self._X           = None
+        self._y           = None
+        self._X_scaled    = None
+        self._train_idx   = None
+        self._test_idx    = None
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     def _c(self, role):
@@ -402,7 +435,7 @@ class SalesForecastModel:
         y_te = self._y.iloc[self._test_idx]
 
         self.clf = RandomForestClassifier(
-            n_estimators=300, max_depth=10, min_samples_leaf=3,
+            **self.clf_params,
             class_weight="balanced", random_state=42, n_jobs=-1,
         )
         self.clf.fit(X_tr, y_tr)
@@ -419,8 +452,113 @@ class SalesForecastModel:
         print("\n===== MÉTRICAS DE VALIDACIÓN =====")
         for k, v in self.metrics.items():
             print(f"  {k.capitalize():<10}: {v:.2%}")
-        print("\n", classification_report(y_te, pred,
+        print("\n", classification_report(y_te, pred, labels=[0, 1, 2],
               target_names=["Reducir", "Mantener", "Reforzar"], zero_division=0))
+
+    # ── 5b. VALIDACIÓN CRUZADA TEMPORAL (splitter mensual) ───────────────────
+    def _monthly_time_series_folds(self, dates, n_splits):
+        """
+        Genera folds de validación cruzada temporal a partir del MES de cada
+        fila (no de la posición de la fila), aplicando TimeSeriesSplit sobre
+        los meses únicos ordenados cronológicamente.
+
+        Con esto se garantiza que en cada fold todos los meses de validación
+        sean estrictamente posteriores a todos los meses de entrenamiento de
+        ese fold, y que ningún mes quede partido entre ambos conjuntos (algo
+        que un TimeSeriesSplit aplicado directamente sobre las filas no
+        garantiza, porque varias filas comparten el mismo mes).
+
+        Parámetros
+        ----------
+        dates    : secuencia de fechas alineada POSICIONALMENTE (mismo orden
+                   y longitud) con las filas del frame que se pasará como X
+                   a GridSearchCV.
+        n_splits : número de folds del TimeSeriesSplit.
+
+        Devuelve una lista de tuplas (train_positions, val_positions) con
+        posiciones 0-based dentro de ese frame, tal como las espera el
+        parámetro cv= de GridSearchCV (lista de folds ya calculados).
+        """
+        dates = pd.Series(dates).reset_index(drop=True)
+        meses_unicos = np.sort(dates.unique())
+
+        splitter = TimeSeriesSplit(n_splits=n_splits)
+        folds = []
+        for pos_meses_train, pos_meses_val in splitter.split(meses_unicos):
+            meses_train = meses_unicos[pos_meses_train]
+            meses_val = meses_unicos[pos_meses_val]
+            train_positions = np.flatnonzero(dates.isin(meses_train).to_numpy())
+            val_positions = np.flatnonzero(dates.isin(meses_val).to_numpy())
+            folds.append((train_positions, val_positions))
+
+        return folds
+
+    def tune_classifier(self, param_grid=None, n_splits=5, scoring="f1_weighted"):
+        """
+        Ajusta los hiperparámetros del RandomForestClassifier con GridSearchCV,
+        usando validación cruzada temporal (TimeSeriesSplit por mes, ver
+        _monthly_time_series_folds) sobre la partición de ENTRENAMIENTO
+        únicamente (self._train_idx): las filas de prueba nunca participan en
+        la selección de hiperparámetros.
+
+        El estimador es un Pipeline (RobustScaler + RandomForestClassifier)
+        para que el escalador se reajuste en cada fold con sus propias filas
+        de entrenamiento, sin fuga de datos entre folds; por eso se le pasa
+        X sin escalar (self._X, no self._X_scaled).
+
+        Requiere haber ejecutado prepare_split() previamente. Guarda
+        self.tuning_results (tabla de cv_results_ ordenada por rank) y
+        self.best_clf_params (sin el prefijo 'rf__'). NO modifica
+        self.clf_params automáticamente; para aplicar el resultado hay que
+        combinarlo explícitamente (ver scripts/tune_rf.py). Devuelve
+        self.best_clf_params.
+        """
+        if self._X is None or self._train_idx is None:
+            raise RuntimeError(
+                "Ejecute prepare_split() antes de tune_classifier()."
+            )
+
+        param_grid = param_grid or DEFAULT_PARAM_GRID
+
+        X_train = self._X.loc[self._train_idx]
+        y_train = self._y.loc[self._train_idx]
+        fechas_train = self._df_train.loc[self._train_idx, "fecha"]
+
+        folds = self._monthly_time_series_folds(fechas_train, n_splits)
+
+        pipeline = Pipeline([
+            ("scaler", RobustScaler()),
+            ("rf", RandomForestClassifier(
+                class_weight="balanced", random_state=42, n_jobs=-1,
+            )),
+        ])
+
+        grid = GridSearchCV(
+            pipeline, param_grid=param_grid, cv=folds,
+            scoring=scoring, n_jobs=1, refit=False,
+        )
+        grid.fit(X_train, y_train)
+
+        columnas = [
+            col for col in grid.cv_results_
+            if col.startswith("param_")
+            or col in ("mean_test_score", "std_test_score", "rank_test_score")
+        ]
+        self.tuning_results = (
+            pd.DataFrame(grid.cv_results_)[columnas]
+            .sort_values("rank_test_score")
+            .reset_index(drop=True)
+        )
+
+        self.best_clf_params = {
+            k.replace("rf__", ""): v for k, v in grid.best_params_.items()
+        }
+
+        print(f"[✓] tune_classifier: {len(self.tuning_results)} combinaciones "
+              f"evaluadas ({n_splits} folds mensuales, scoring={scoring})")
+        print(f"    Mejor combinación: {self.best_clf_params}")
+
+        return self.best_clf_params
 
     # ── 6. REGRESOR ───────────────────────────────────────────────────────────
     def train_regressor(self):
