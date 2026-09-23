@@ -1,5 +1,46 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Corrección] - 2026-09-22 (KMeans)
+
+### Fuga de datos en el clustering + selección de k (`train_kmeans_rf_prod.py`)
+
+**Problema**: `cluster()` ajustaba `RobustScaler` y `KMeans` con TODAS las filas de `self.df` (incluyendo el período de prueba y el mes a predecir), es decir, la misma fuga de datos que ya se había corregido en el escalador del clasificador. Además, `k=3` estaba fijado sin evidencia (sin método del codo ni coeficiente de silueta).
+
+**Corrección**:
+- Se extrajo el filtro de filas de entrenamiento y el split temporal por producto a un helper compartido (`_build_train_frame()`), usado tanto por `cluster()` como por `prepare_split()`, para que ambos entrenen con exactamente la misma partición.
+- `cluster()` ahora ajusta el escalador (`self.cluster_scaler`) y KMeans (`self.kmeans`) solo con la partición de entrenamiento, y luego asigna cluster a todas las filas de `self.df` (prueba y mes a predecir) con `predict()`.
+- Se agregó `evaluate_k(k_range, sample_size)`, que calcula inercia y silueta para un rango de k sobre la partición de entrenamiento (sin fuga), sin modificar `self.n_clusters` ni el estado del pipeline.
+- Nuevo script `scripts/select_k.py` que ejecuta `evaluate_k` sobre `Query_Result_V5.csv` y exporta tabla + gráfico (codo y silueta).
+
+**Resultado de `select_k.py` sobre `Query_Result_V5.csv`** (k evaluado de 2 a 10, sobre la partición de entrenamiento):
+
+| k | Inercia | Silueta |
+|---|---|---|
+| 2 | 690563,58 | 0,9485 |
+| 3 | 501512,56 | 0,8315 |
+| 4 | 419882,47 | 0,7635 |
+| 5 | 350324,75 | 0,7303 |
+| 6 | 287355,06 | 0,6632 |
+| 7 | 241275,30 | 0,6614 |
+| 8 | 199370,31 | 0,6571 |
+| 9 | 171041,06 | 0,6353 |
+| 10 | 155281,90 | 0,6095 |
+
+k con mayor silueta: **2** (por decidir: el modelo en producción se mantiene con `n_clusters=3`, valor que se conserva sin cambios hasta que se decida explícitamente si se ajusta).
+
+**Impacto en el clasificador** (V5, promedio ponderado, 3 clases; la variable `cluster` es una de las features del clasificador, por eso cambia levemente al corregir la fuga del clustering):
+
+| Métrica | Antes (solo fix de escalador) | Después (fix de KMeans) |
+|---|---|---|
+| Accuracy | 62,29 % | 62,16 % |
+| Precision | 64,22 % | 64,16 % |
+| Recall | 62,29 % | 62,16 % |
+| F1 | 62,89 % | 62,75 % |
+
+**Prueba**: `tests/test_kmeans_selection.py` (`python -m unittest tests.test_kmeans_selection`).
+
+---
+
 ## [Corrección] - 2026-09-22
 
 ### Fuga de datos en el escalado (`train_kmeans_rf_prod.py`)

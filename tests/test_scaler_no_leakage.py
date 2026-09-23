@@ -16,29 +16,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from train_kmeans_rf_prod import SalesForecastModel  # noqa: E402
 
-
-def _synthetic_history(n_products=6, n_months=24):
-    """Historial mensual con tendencia creciente: los meses de prueba
-    tienen valores mayores que los de entrenamiento, así la mediana del
-    conjunto completo difiere de la mediana del entrenamiento."""
-    rows = []
-    fechas = pd.date_range("2024-01-01", periods=n_months, freq="MS")
-    rng = np.random.default_rng(0)
-    for p in range(n_products):
-        for i, fecha in enumerate(fechas):
-            total = 1000.0 * (i + 1) * (p + 1) + rng.integers(0, 500)
-            rows.append({
-                "CODIGO": p,
-                "DESCRIPCION": f"PRODUCTO {p}",
-                "fecha": fecha,
-                "VENTAS": float(i + 1 + p),
-                "TOTAL_VENDIDO": total,
-                "PRECIO_PROMEDIO": total / (i + 1 + p),
-                "FRECUENCIA": i + 1,
-                "ANIO": fecha.year,
-                "MES": fecha.month,
-            })
-    return pd.DataFrame(rows)
+from tests._helpers import synthetic_history as _synthetic_history  # noqa: E402
 
 
 class ScalerNoLeakageTest(unittest.TestCase):

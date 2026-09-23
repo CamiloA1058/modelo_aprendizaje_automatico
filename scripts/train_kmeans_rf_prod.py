@@ -35,7 +35,7 @@ from sklearn.preprocessing import RobustScaler
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
-    f1_score, classification_report,
+    f1_score, classification_report, silhouette_score,
 )
 
 # ── Nombres de columna por defecto ────────────────────────────────────────────
@@ -115,6 +115,8 @@ class SalesForecastModel:
         self.df           = None   # historial completo
         self.df_predict   = None   # filas del último mes (para predecir)
         self.scaler       = RobustScaler()
+        self.cluster_scaler = RobustScaler()  # escalador exclusivo del clustering
+        self.kmeans       = None
         self.clf          = None
         self.reg          = None
         self.results      = None   # predicciones del mes siguiente
@@ -214,16 +216,102 @@ class SalesForecastModel:
         self.df = df
         print("[✓] Features construidas")
 
+    # ── Helper compartido: partición temporal de entrenamiento/prueba ────────
+    def _build_train_frame(self):
+        """
+        Filtra las filas con target (mes siguiente) conocido y válido, y aplica
+        el split temporal por producto (primeras train_ratio filas de cada
+        producto, ordenadas por fecha, van a entrenamiento).
+
+        Usado tanto por cluster() como por prepare_split() para que ambos
+        entrenen con exactamente la misma partición y no haya fuga de datos
+        del período de prueba ni del mes a predecir.
+
+        Devuelve (df_train, train_idx, test_idx).
+        """
+        c = self._c
+
+        df_train = self.df[
+            self.df["target"].notna() &
+            (self.df["target"] > 0) &
+            (self.df[c("total_sold")] > 0)
+        ].copy().reset_index(drop=True)
+
+        train_idx, test_idx = [], []
+        for _, g in df_train.groupby(c("id")):
+            g = g.sort_values("fecha")
+            cut = int(len(g) * self.train_ratio)
+            train_idx += g.index[:cut].tolist()
+            test_idx  += g.index[cut:].tolist()
+
+        return df_train, train_idx, test_idx
+
     # ── 3. CLUSTERING ─────────────────────────────────────────────────────────
     def cluster(self):
+        """
+        Ajusta el escalador y KMeans SOLO con la partición de entrenamiento
+        (sin filas de prueba ni del mes a predecir) para evitar fuga de datos;
+        luego asigna cluster a TODAS las filas de self.df (incluyendo prueba
+        y el mes a predecir) con predict().
+        """
         c = self._c
-        X_c = RobustScaler().fit_transform(
-            self.df[[c("total_sold"), c("frequency"), c("avg_price")]].fillna(0)
-        )
-        self.df["cluster"] = KMeans(
+        cluster_cols = [c("total_sold"), c("frequency"), c("avg_price")]
+
+        df_train, train_idx, _ = self._build_train_frame()
+        X_train = df_train.loc[train_idx, cluster_cols].fillna(0)
+        X_all   = self.df[cluster_cols].fillna(0)
+
+        self.cluster_scaler = RobustScaler()
+        self.cluster_scaler.fit(X_train)
+
+        self.kmeans = KMeans(
             n_clusters=self.n_clusters, random_state=42, n_init=10
-        ).fit_predict(X_c)
-        print(f"[✓] KMeans con {self.n_clusters} clusters")
+        )
+        self.kmeans.fit(self.cluster_scaler.transform(X_train))
+
+        self.df["cluster"] = self.kmeans.predict(
+            self.cluster_scaler.transform(X_all)
+        )
+        print(f"[✓] KMeans con {self.n_clusters} clusters "
+              f"(ajustado solo con {len(train_idx):,} filas de entrenamiento)")
+
+    # ── 3b. SELECCIÓN DE k (método del codo + silueta) ───────────────────────
+    def evaluate_k(self, k_range=range(2, 11), sample_size=10000):
+        """
+        Evalúa varios valores de k para KMeans mediante inercia (método del
+        codo) y coeficiente de silueta, usando solo la partición de
+        entrenamiento (mismo criterio que cluster(), sin fuga de datos).
+
+        Requiere haber ejecutado build_features() previamente. No modifica
+        self.n_clusters ni ningún otro estado del pipeline (escaladores/
+        modelos locales a este método).
+
+        Devuelve un DataFrame con columnas: k, inercia, silueta.
+        """
+        c = self._c
+        cluster_cols = [c("total_sold"), c("frequency"), c("avg_price")]
+
+        df_train, train_idx, _ = self._build_train_frame()
+        X_train = df_train.loc[train_idx, cluster_cols].fillna(0)
+
+        scaler = RobustScaler()
+        X_scaled = scaler.fit_transform(X_train)
+
+        filas = []
+        for k in k_range:
+            kmeans_k = KMeans(n_clusters=k, random_state=42, n_init=10)
+            labels = kmeans_k.fit_predict(X_scaled)
+            filas.append({
+                "k": k,
+                "inercia": kmeans_k.inertia_,
+                "silueta": silhouette_score(
+                    X_scaled, labels,
+                    sample_size=min(sample_size, len(X_scaled)),
+                    random_state=42,
+                ),
+            })
+
+        return pd.DataFrame(filas)
 
     # ── 4. SEPARAR: histórico de entrenamiento vs último mes ─────────────────
     def prepare_split(self):
@@ -244,13 +332,8 @@ class SalesForecastModel:
             "cluster",
         ]
 
-        # ── Dataset de entrenamiento ──────────────────────────────────────────
-        # Solo filas donde el target (mes siguiente) es conocido y válido
-        df_train = self.df[
-            self.df["target"].notna() &
-            (self.df["target"] > 0) &
-            (self.df[c("total_sold")] > 0)
-        ].copy().reset_index(drop=True)
+        # ── Dataset de entrenamiento (mismo filtro y split que cluster()) ────
+        df_train, train_idx, test_idx = self._build_train_frame()
 
         # Target en 3 clases:
         #   2 = Reforzar  (growth_ratio > growth_threshold)
@@ -263,14 +346,6 @@ class SalesForecastModel:
 
         X = df_train[self._features].fillna(0)
         y = df_train["target_class"]
-
-        # Split temporal por producto
-        train_idx, test_idx = [], []
-        for _, g in df_train.groupby(c("id")):
-            g = g.sort_values("fecha")
-            cut = int(len(g) * self.train_ratio)
-            train_idx += g.index[:cut].tolist()
-            test_idx  += g.index[cut:].tolist()
 
         # El escalador se ajusta solo con entrenamiento para que las
         # métricas de prueba no incorporen estadísticos del conjunto de prueba
