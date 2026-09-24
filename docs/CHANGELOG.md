@@ -1,5 +1,534 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Limpieza] - 2026-09-23
+
+### Ajustes masivos de inventario CONFIRMADOS y excluidos (`remove_bulk_adjustments`, `src/ventas_forecast/data/cleaning.py`)
+
+**Por qué**: la entrada anterior ([Comparación] 2026-09-23) dejaba pendiente de decisión la anomalía del 19/02/2026 (1.761 productos con exactamente 12 unidades a 111 COP cada uno). El dueño del negocio la **CONFIRMÓ como una carga/ajuste de inventario del sistema, no una venta real**: es estadísticamente imposible que 1.761 productos sin relación entre sí (tornillos, retenes, rodillos, etc.) se vendan el mismo día con idéntica cantidad e idéntico precio. Además, la limpieza debe vivir **dentro del pipeline** (no solo en el CSV curado a mano como `data/raw/cleaner.py`), porque a futuro el sistema leerá directamente la base de datos de la empresa.
+
+**Regla implementada** (`remove_bulk_adjustments(df, date_col, id_col, qty_col, price_col, min_products=100)`, función de módulo en `src/ventas_forecast/data/cleaning.py`, con envoltorio `DatasetCleaner.remove_bulk_adjustments()` para reutilizarla en scripts de limpieza offline): elimina las filas cuya combinación EXACTA (fecha, cantidad, precio) es compartida por al menos `min_products` productos **distintos** ese mismo día (se cuentan productos distintos, no filas: varias filas del mismo producto con igual fecha/cantidad/precio no inflan el conteo). No se hardcodea ninguna fecha, cantidad ni precio.
+
+**Por qué el umbral por defecto (100) es conservador** — verificado sobre `data/raw/Query_Result_V5.csv`, top 5 grupos (fecha, cantidad, precio) por número de productos distintos:
+
+| # | Fecha | Cantidad | Precio (COP) | Productos distintos |
+|---|---|---|---|---|
+| 1 | 2026-02-19 | 12 | 111 | **1.761** (caso confirmado) |
+| 2 | 2024-03-27 | 20 | 1.111 | 46 |
+| 3 | 2024-03-27 | 10 | 1.111 | 29 |
+| 4 | 2024-03-27 | 40 | 1.111 | 22 |
+| 5 | 2024-04-12 | 1 | 100 | 19 |
+
+El segundo grupo más grande (46 productos) queda muy por debajo del umbral de 100: con `min_products=100` la regla elimina **exactamente** el caso confirmado y no toca ningún otro grupo de la V5 actual.
+
+**Integración en el pipeline** (`scripts/train_kmeans_rf_prod.py`): `SalesForecastModel.load_and_clean()` aplica la regla justo después de parsear los numéricos (`_parse_numeric`) y antes de agregar a producto-mes, porque el ajuste se detecta a nivel de **fila diaria** (columna `FECHA`, agregada como nuevo rol `"date"` en `DEFAULT_COL_MAP`) — a nivel mensual varios productos legítimos podrían coincidir por casualidad. Nuevo parámetro del constructor `bulk_adjustment_min_products=100` (`None` desactiva la regla); el resumen de filas eliminadas queda en `self.cleaning_summary` (rows_removed, distinct_products, affected_dates, cop_amount) y se imprime. `scripts/app.py` no necesita cambios: no pasa este parámetro, así que usa el valor por defecto.
+
+**Pruebas nuevas** (TDD, RED→GREEN, `tests/test_bulk_adjustments.py`, 8 casos): elimina un grupo sintético que alcanza el umbral; conserva un grupo por debajo del umbral; conserva la misma cantidad/precio en fechas distintas (cada fecha se evalúa por separado); cuenta productos DISTINTOS y no filas (varias filas del mismo producto no inflan el conteo); `bulk_adjustment_min_products=None` desactiva la regla en el modelo; `load_and_clean()` la aplica de punta a punta sobre un CSV temporal con el formato real (separador `;`, números `12,00` / `1.332,00`).
+
+**Resultados sobre `Query_Result_V5.csv`**:
+- **1.761 filas eliminadas** (1.761 productos distintos, 1 fecha: 19/02/2026, **$2.345.652 COP** excluidos — 0,0176 % del total de ventas en pesos del dataset).
+- HALLAZGO adicional: de esos 1.761 productos, **580 tenían esa fila de ajuste como su ÚNICO registro** en todo el histórico y por lo tanto **desaparecen por completo** del dataset limpio (5.654 → 5.074 productos distintos). Los 1.181 productos restantes conservan su historial real, solo sin esa fila.
+- `outputs/reports/eda_resumen.txt` (sección 1, calidad de datos) ahora reporta explícitamente el ajuste excluido y los productos que desaparecen por completo.
+- El pico irreal del histograma de distribución de ventas (`outputs/figures/eda_distribucion_ventas.png`) alrededor de ~1,3 k COP **desaparece** tras la exclusión (verificado visualmente).
+
+**Recálculo de k, ajuste de hiperparámetros, evaluación, comparación y EDA sobre la V5 limpia** (antes = con el ajuste de inventario incluido, ver entradas anteriores; después = excluido):
+
+**1) Selección de k** (`scripts/select_k.py`, `evaluate_k`) — k=3 **sigue siendo** el máximo de silueta, sin cambios de conclusión:
+
+| k | Silueta (antes) | Silueta (después) |
+|---|---|---|
+| 2 | — | 0,3557 |
+| **3** | **0,3782** | **0,3753** |
+| 4 | — | 0,3297 |
+
+**2) Ajuste de hiperparámetros** (`scripts/tune_rf.py`, `scoring=f1_macro`, 5 folds mensuales, 24 combinaciones, 149,3 s):
+
+| | Antes | Después |
+|---|---|---|
+| Mejores hiperparámetros | `n_estimators=300, max_depth=14, min_samples_leaf=5` | `n_estimators=300, max_depth=14, min_samples_leaf=3` |
+| F1 macro CV (media ± desv.) | 0,4415 ± 0,0178 | 0,4403 ± 0,0195 |
+
+`min_samples_leaf` pasa de 5 a 3 (`n_estimators`/`max_depth` no cambian): un modelo con hojas ligeramente más pequeñas vuelve a ser el mejor una vez excluidos los 1.761 registros de ajuste. **`DEFAULT_CLF_PARAMS` actualizado** (`scripts/train_kmeans_rf_prod.py`) y **pinning test actualizado con TDD** (`tests/test_rf_tuning.py::test_default_clf_params_are_the_tuned_values`: RED con la aserción `min_samples_leaf == 3` contra el valor viejo `5` → GREEN al actualizar la constante).
+
+**3) Evaluación del modelo** (`scripts/evaluate_model.py`):
+
+Clasificador (prueba, n=8.942 antes de la limpieza tenía n=9.578; distribución de clases similar):
+
+| Métrica | Antes | Después |
+|---|---|---|
+| F1 macro | 0,4606 | 0,4525 |
+| Accuracy balanceada | 0,5148 | 0,5016 |
+| Accuracy | 0,6831 | 0,6751 |
+| F1 ponderado | 0,7194 | 0,7083 |
+| F1 Reducir / Mantener / Reforzar | 0,80 / 0,10 / 0,48 | 0,79 / 0,08 / 0,49 |
+| Línea base "siempre Reducir" — F1 macro / acc. bal. / Accuracy | 0,2948 / 0,3333 / 79,30 % | 0,2930 / 0,3333 / 78,42 % |
+
+Ligero deterioro generalizado (menos de 1,2 puntos porcentuales en cada métrica): esperable, porque los 1.761 registros de ajuste creaban 1.761 observaciones "producto vende exactamente 12 unidades a 111 COP" artificialmente fáciles de clasificar de forma consistente; al quitarlas, el problema real (más ruidoso) queda mejor representado. **La conclusión no cambia**: el modelo sigue superando ampliamente a la línea base de clase mayoritaria en F1 macro y accuracy balanceada, y sigue por debajo en accuracy simple (mismo patrón que antes).
+
+Regresor (prueba, top 1.900 productos, n=5.038 antes → n=5.062 después):
+
+| Métrica | Modelo (antes) | Modelo (después) | Ingenuo (antes) | Ingenuo (después) | Media_3 (antes) | Media_3 (después) |
+|---|---|---|---|---|---|---|
+| MAE (COP) | 382.162 | 385.016 | 645.453 | 644.901 | 494.885 | 493.789 |
+| RMSE (COP) | 1.224.574 | 1.244.584 | 1.654.083* | 1.651.228 | 1.235.545* | 1.232.872 |
+| R² | 0,6150 | 0,6005 | 0,2976 | 0,2969 | 0,6081 | 0,6080 |
+| MASE | 0,8743 | 0,8887 | 1,4766 | 1,4885 | 1,1322 | 1,1397 |
+
+(*RMSE "antes" tomado de `compare_models.py`, no reportado en la entrada de evaluación original). **Cambio de conclusión parcial**: el modelo sigue superando a ambas líneas base en MAE y MASE (MASE < 1) y al ingenuo en todas las métricas, pero Media_3 pasa a tener RMSE y R² ligeramente mejores (RMSE 1.232.872 vs 1.244.584; R² 0,6080 vs 0,6005): Media_3 comete menos errores muy grandes, el modelo acierta mejor en el error típico.
+
+**4) Comparación de modelos** (`scripts/compare_models.py`, 214,1 s):
+
+Clasificador (n=8.942): Random Forest sigue ganando en F1 macro (0,4525 vs XGBoost 0,4451 vs mayoritaria 0,2930) y F1 ponderado; XGBoost sigue ganando por poco en accuracy balanceada (0,5116 vs 0,5016) — mismo patrón que antes, sin cambio de conclusión. Mejores hiperparámetros de XGBoost sin cambios: `learning_rate=0,05, max_depth=4, n_estimators=200`.
+
+Regresión A (prueba completa, top productos, n=5.038 antes → n=5.062 después): Random Forest gana a XGBoost e ingenuo en las 4 métricas (MAE 385.016 vs XGBoost 428.863, R² 0,6005 vs 0,4645, MASE 0,8887 vs 0,9899) y a Media_3 en MAE y MASE (493.789 / 1,1397), pero **Media_3 gana en RMSE y R²** (1.232.872 / 0,6080 vs 1.244.584 / 0,6005) — cambio de conclusión respecto de la versión anterior, donde RF ganaba las 4.
+
+Regresión B (muestra de 150 productos, semilla 42; n=348 filas antes → **n=371 filas después**, porque el universo de productos elegibles cambió tras la limpieza):
+
+| Métrica | RF | XGBoost | Ingenuo | Media_3 | ARIMA(1,1,1) | Prophet |
+|---|---|---|---|---|---|---|
+| MAE (COP) | **296.272** | 344.308 | 451.419 | 367.612 | 320.998 | 310.613 |
+| RMSE (COP) | 1.050.444 | 1.167.985 | 1.018.441 | **917.032** | 944.640 | 927.276 |
+| R² | 0,5085 | 0,3924 | 0,5380 | **0,6254** | 0,6025 | 0,6170 |
+| MASE | **0,6838** | 0,7947 | 1,0419 | 0,8485 | 0,7409 | 0,7169 |
+
+**CAMBIO DE CONCLUSIÓN a declarar honestamente**: antes de esta limpieza, Random Forest ganaba en las 4 métricas de la Regresión B (MAE 265.580, RMSE 741.062, R² 0,2462, MASE 0,6076, superando también a ARIMA y Prophet). **Después de excluir los ajustes de inventario, Random Forest sigue ganando en MAE y MASE** (las métricas que este trabajo usa como principales para el regresor, ver entradas anteriores), **pero el baseline Media_3 pasa a tener mejor RMSE y R² que Random Forest** en esta muestra de 150 productos (RMSE 917.032 vs 1.050.444; R² 0,6254 vs 0,5085). El mismo patrón aparece, más atenuado, en la Regresión A (conjunto de prueba completo): RF gana en MAE y MASE y Media_3 en RMSE y R². Como el RMSE y el R² penalizan con fuerza los errores muy grandes, la lectura es que RF tiene menor error típico y Media_3 menos errores extremos. La diferencia en Regresión B es atribuible al tamaño de muestra (150 productos, 371 filas) y a que la semilla 42 ahora sortea sobre un universo de productos distinto (5.074 en vez de 5.654); se reporta sin ocultarla, para el capítulo de resultados del documento final.
+
+**5) EDA** (`scripts/eda.py`, 15,9 s):
+
+| | Antes | Después |
+|---|---|---|
+| Productos distintos (tras limpieza) | 5.654 | 5.074 |
+| Producto-mes antes de completar calendario | 34.938 | 33.387 |
+| Producto-mes tras completar calendario | 100.937 | 99.765 |
+| Clase A / B / C (productos) | 532 (9,4 %) / 963 (17,0 %) / 4.159 (73,6 %) | 532 (10,5 %) / 960 (18,9 %) / 3.582 (70,6 %) |
+| Clase A / B / C (% de ventas) | 79,97 % / 15,02 % / 5,00 % | 79,99 % / 15,01 % / 5,01 % |
+| % producto-mes con venta cero | 65,39 % | 66,53 % |
+| Mediana / Q1 / Q3 de venta-cero por producto | 71,43 % / 50,00 % / 86,36 % | 76,47 % / 50,00 % / 88,89 % |
+
+El porcentaje de productos en clase C baja (menos productos "de relleno" sin ventas reales) y el share de meses en cero sube ligeramente (consistente con que los 580 productos que desaparecieron eran, por definición, los que menos historial real tenían). Los 3 segmentos de clúster (bajo volumen/precio, medio, alta rotación) se mantienen cualitativamente iguales, solo con índices de cluster reordenados por KMeans y valores medianos ligeramente distintos (p. ej. cluster de alta rotación: 339.500→353.114 COP, frecuencia mediana 11 sin cambios).
+
+**Figuras verificadas visualmente** (Read): `eda_ventas_mensuales.png`, `eda_estacionalidad.png`, `eda_pareto_abc.png`, `eda_distribucion_ventas.png` (pico de ~1,3 k COP ya no aparece), `outputs/figures/comparacion_modelos.png`, `matriz_confusion.png`, `real_vs_predicho.png`, `seleccion_k_kmeans.png` — todas renderizan correctamente. Nota cosmética preexistente (no introducida por este cambio, no corregida aquí): en `comparacion_modelos.png` la etiqueta roja "Pronóstico ingenuo (entrenamiento)" se superpone parcialmente con las marcas del eje X del panel de MASE.
+
+**Archivos modificados**: `src/ventas_forecast/data/cleaning.py` (nueva función `remove_bulk_adjustments` + método `DatasetCleaner.remove_bulk_adjustments`), `src/ventas_forecast/data/__init__.py` (export), `scripts/train_kmeans_rf_prod.py` (`DEFAULT_COL_MAP["date"]`, constructor `bulk_adjustment_min_products`, `self.cleaning_summary`, llamada en `load_and_clean()`, `DEFAULT_CLF_PARAMS` actualizado), `scripts/eda.py` (sección 1 reporta el ajuste excluido y los productos perdidos), `tests/test_bulk_adjustments.py` (nuevo), `tests/test_rf_tuning.py` (pinning test actualizado).
+
+---
+
+## [EDA] - 2026-09-23
+
+### Análisis exploratorio de datos (`src/ventas_forecast/eda.py`, `scripts/eda.py`)
+
+**Por qué**: las fases 2 (comprensión de datos) y 3 (preparación de datos) de CRISP-DM necesitan evidencia exploratoria explícita del trabajo de grado — calidad de datos, tamaño del dataset en cada etapa de limpieza, clasificación ABC, intermitencia de la demanda y estacionalidad — que hasta ahora solo existía implícita en el código de `SalesForecastModel`.
+
+**Nuevas funciones puras** (`src/ventas_forecast/eda.py`, TDD con `tests/test_eda.py`, RED→GREEN, 12 casos):
+- `data_quality_summary(raw_df, col_map)`: filas/columnas, nulos por columna, duplicados exactos, filas con id de producto nulo, número de productos y rango de fechas — sobre el CSV **crudo**, antes de cualquier agregación.
+- `monthly_totals(df, date_col, value_col)` / `seasonal_profile(monthly)`: total por mes calendario y, a partir de esa serie, promedio por número de mes (1-12) junto con el número de AÑOS que aportaron una observación a ese mes (para exponer lo débil de la estimación con solo 2-3 años de historial).
+- `abc_classification(df, id_col, value_col, a=0.80, b=0.95)`: tabla ABC por producto (participación acumulada descendente) y resumen (productos y % de ventas por clase). Regla de frontera DECIDIDA y probada explícitamente: la clase se define por el acumulado INCLUYENDO al propio producto (A si ≤80 %, B si ≤95 %, C en el resto); un producto que por sí solo hace que el acumulado SUPERE un corte (p. ej. uno que concentra el 82 % de las ventas) queda clasificado en la clase siguiente, no en la anterior.
+- `intermittency_summary(df, id_col, value_col)`: fracción global de filas producto-mes con venta cero y distribución (mediana/Q1/Q3) de esa fracción por producto, sobre el calendario ya completo.
+
+**Script** `scripts/eda.py`: usa el CSV crudo solo para la calidad de datos, y el pipeline real (`load_and_clean` → `build_features` → `cluster` → `prepare_split`, instrumentando `_complete_calendar` sin alterar su lógica) para todo lo demás. Genera `outputs/reports/eda_resumen.txt` y 4 figuras (paleta del proyecto, sin títulos dentro de la imagen): `eda_ventas_mensuales.png`, `eda_estacionalidad.png`, `eda_pareto_abc.png`, `eda_distribucion_ventas.png`.
+
+**Resultados reales** (`Query_Result_V5.csv`, 18,0 s):
+
+- **Calidad de datos (crudo)**: 78.921 filas, 13 columnas, 0 duplicados exactos. Único nulo: `CODIGO` en 8 filas (`DESCRIPCION="VARIOS"`, 435.000 COP, 0,0033 % del total). HECHO verificado en el código: `load_and_clean()` agrupa con `groupby([id, description, fecha])`, que usa `dropna=True` por defecto — esas 8 filas se excluyen silenciosamente del agregado y nunca llegan a clustering/entrenamiento/predicción (pérdida económica despreciable, pero silenciosa). 5.654 productos; rango 2024-01-09 a 2026-03-27 (27 meses distintos); primer mes (2024-01) parcial (arranca el día 9) y último mes (2026-03) parcial (termina el día 27).
+- **Tamaño del dataset**: 78.921 filas crudas → 34.938 filas producto-mes (antes de completar calendario) → **100.937 filas** tras `_complete_calendar` (65.999 filas de mes sin venta agregadas), 5.654 productos, 27 meses calendario.
+- **Clasificación ABC** (participación de `TOTAL_VENDIDO`, corte 80/95): Clase A 532 productos (9,4 %) → 79,97 % de las ventas; Clase B 963 productos (17,0 %) → 15,02 %; Clase C 4.159 productos (73,6 %) → 5,00 %. Concentración fuerte: menos del 10 % de los productos explica el 80 % de las ventas.
+- **Intermitencia**: 65,39 % de las filas producto-mes tienen venta cero. Distribución por producto de esa fracción: mediana 71,43 %, Q1 50,00 %, Q3 86,36 % — la mayoría de los productos no vende en más de la mitad de sus meses activos, y para la mitad de los productos eso ocurre en más del 71 % de los meses.
+- **Estacionalidad** (promedio mensual, ADVERTENCIA — solo 2-3 años de historial): mínimo en abril (344,1 M COP, n=2 años) y máximo en julio (681,1 M COP, n=2 años); enero/febrero/marzo tienen 3 años de historial (2024-2026), el resto solo 2 — estimación estacional débil, no concluyente para el documento final.
+- **Perfil de clusters** (partición de entrenamiento, escala original, k=3): cluster 0 — 10.411 filas, mediana `TOTAL_VENDIDO` 120.000 COP, `FRECUENCIA` 2,0, `PRECIO_PROMEDIO` 29.850 COP; cluster 1 — 8.433 filas, 6.408 COP, 1,0, 1.200 COP (ventas y precio bajos, baja frecuencia); cluster 2 — 4.876 filas, 339.500 COP, 11,0, 13.336 COP (mayor frecuencia y ventas, precio intermedio). Interpretación cualitativa completa (nombres de segmento) se deja para el documento de tesis con estos números como evidencia.
+
+## [Comparación] - 2026-09-23
+
+### Comparación justa de modelos sobre V5 (`scripts/compare_models.py`, `src/ventas_forecast/benchmarks.py`)
+
+**Condiciones de equidad**: misma partición temporal 80/20 por producto, mismas filas de prueba y mismas métricas para todos los modelos.
+- Clasificación: Random Forest vs XGBoost vs clase mayoritaria. XGBoost se ajustó con GridSearchCV sobre los mismos pliegues mensuales y F1 macro, con pesos de clase balanceados (mejor: `learning_rate=0.05, max_depth=4, n_estimators=200`).
+- Regresión A: las 5.038 filas de prueba de los productos principales. El regresor XGBoost no se ajustó (`n_estimators=400, max_depth=6, learning_rate=0.05`).
+- Regresión B: muestra semillada de 150 productos (348 filas) para incluir Prophet y ARIMA(1,1,1), que se re-entrenan mes a mes con pronóstico a un paso (nunca ven el mes que pronostican). Respaldo ingenuo cuando el historial tiene menos de 6 meses: 9 filas en cada modelo.
+
+**Corrección previa en Prophet**: la estacionalidad anual automática (se activa con ~2 años de datos) sobreajustaba series intermitentes y disparaba el pronóstico (hasta 4,2e10 frente a un máximo histórico de 1,3e6; MAE 122.510.008). Se desactivó (`yearly_seasonality=False`); prueba de regresión con la serie real del producto 1185.
+
+**1) Clasificador (prueba, n = 9.578)**
+
+| Métrica | Random Forest | XGBoost | Clase mayoritaria |
+|---|---|---|---|
+| F1 macro | **0,4606** | 0,4454 | 0,2948 |
+| Accuracy balanceada | 0,5148 | **0,5185** | 0,3333 |
+| Accuracy | 0,6831 | 0,6276 | 0,7930 |
+| F1 ponderado | **0,7194** | 0,6905 | 0,7014 |
+| F1 Reducir / Mantener / Reforzar | 0,80 / 0,10 / 0,48 | 0,76 / 0,10 / 0,47 | 0,88 / 0 / 0 |
+
+Random Forest gana en F1 macro y F1 ponderado; XGBoost gana por poco en accuracy balanceada (+0,4 puntos). Ambos superan ampliamente a la clase mayoritaria en las métricas principales.
+
+**2) Regresión A (prueba, n = 5.038)**
+
+| Métrica | Random Forest | XGBoost | Ingenuo | Media 3 meses |
+|---|---|---|---|---|
+| MAE (COP) | **382.162** | 432.310 | 645.453 | 494.885 |
+| RMSE (COP) | **1.224.574** | 1.441.172 | 1.654.083 | 1.235.545 |
+| R² | **0,6150** | 0,4668 | 0,2976 | 0,6081 |
+| MASE | **0,8743** | 0,9890 | 1,4766 | 1,1322 |
+
+Random Forest gana en todas las métricas (XGBoost sin ajuste de hiperparámetros).
+
+**3) Regresión B (muestra, n = 348)**
+
+| Métrica | Random Forest | XGBoost | Ingenuo | Media 3 meses | ARIMA(1,1,1) | Prophet |
+|---|---|---|---|---|---|---|
+| MAE (COP) | **265.580** | 299.317 | 511.078 | 401.546 | 477.056 | 364.878 |
+| RMSE (COP) | **741.062** | 763.001 | 1.010.047 | 790.182 | 1.782.513 | 1.018.184 |
+| R² | **0,2462** | 0,2009 | −0,4004 | 0,1429 | −3,3615 | −0,4231 |
+| MASE | **0,6076** | 0,6848 | 1,1692 | 0,9186 | 1,0914 | 0,8347 |
+
+Random Forest gana en todas las métricas. ARIMA(1,1,1) presenta 3 pronósticos disparados en productos con historial corto (9 a 13 meses); sin esos 3 casos su MAE sería 353.010, y Random Forest seguiría siendo el mejor. No se recortaron sus predicciones.
+
+Los scripts `scripts/run_xgboost.py` y `scripts/run_prophet.py` usan datasets antiguos y quedan sustituidos por `scripts/compare_models.py` para la comparación del trabajo de grado.
+
+
+**Anomalía detectada — CONFIRMADA y excluida**: el 19/02/2026, 1.761 productos distintos registran exactamente 12 unidades a 111 COP (1.332 COP cada uno) — el pico del histograma de distribución. Representaba el 0,018 % de las ventas en pesos, pero ~5 % de los meses producto-mes con ventas. El dueño del negocio **CONFIRMÓ** que se trata de una carga/ajuste de inventario del sistema, no una venta real. Se excluyó del pipeline con una regla genérica (`remove_bulk_adjustments`) y se recalcularon k, hiperparámetros, evaluación, comparación y EDA — ver **[Limpieza] - 2026-09-23** (entrada más reciente, arriba) para la justificación del umbral, los resultados antes/después y si alguna conclusión cambió.
+
+---
+
+## [Mejora] - 2026-09-23 (métrica macro)
+
+### Selección de hiperparámetros y métricas principales del clasificador: F1 macro / accuracy balanceada en vez de F1 ponderado / accuracy
+
+**Por qué**: tras el completado de calendario (ver entrada anterior), la partición de prueba del clasificador queda muy desbalanceada — Reducir 7.595 filas (79,30 %), Reforzar 1.646 (17,19 %), Mantener 337 (3,52 %). Con ese desbalance, `tune_classifier(scoring="f1_weighted")` (el valor previo) selecciona hiperparámetros que maximizan el F1 ponderado por soporte, dominado por la clase mayoritaria "Reducir"; y reportar solo accuracy/F1 ponderado es engañoso: la línea base ingenua "siempre predecir Reducir" obtenía **Accuracy 79,30 %** y **F1 ponderado 70,14 %**, ambos por encima o cerca del clasificador entrenado (Acc 72,84 %, F1 74,26 %), pese a que esa línea base tiene macro F1 ≈ 0,29 (no distingue Mantener ni Reforzar en absoluto). DECIDIDO por el usuario: seleccionar hiperparámetros con **F1 macro** (promedia el F1 de cada clase con el mismo peso, sin importar su soporte) y reportar **F1 macro y accuracy balanceada** como métricas principales del clasificador; accuracy y F1 ponderado se conservan en los reportes como referencia, con una nota explicando por qué no bastan solas bajo este desbalance.
+
+**Cambios**:
+- `scripts/train_kmeans_rf_prod.py`:
+  - `tune_classifier()`: `scoring` por defecto pasa de `"f1_weighted"` a `"f1_macro"` (parámetro explícito, se puede seguir pasando otro valor). Docstring actualizado explicando la razón del cambio.
+  - `train_classifier()`: `self.metrics` conserva sus claves existentes (`accuracy`, `precision`, `recall`, `f1` — leídas sin cambios por `scripts/app.py`) y agrega `f1_macro` (`f1_score(average="macro", zero_division=0)`) y `balanced_accuracy` (`balanced_accuracy_score`), redondeadas a 4 decimales; se imprimen junto a las demás.
+  - `DEFAULT_CLF_PARAMS`: recalculado con `tune_classifier(scoring="f1_macro")` sobre `Query_Result_V5.csv` (ver tabla de tuning abajo). `max_depth` pasa de `None` a `14` y `min_samples_leaf` de `1` a `5` (un modelo algo menos profundo y con hojas más grandes generaliza mejor en las clases minoritarias Mantener/Reforzar bajo este criterio).
+- `scripts/evaluate_model.py`: la sección del clasificador muestra primero las métricas principales (F1 macro, accuracy balanceada), luego las ponderadas como referencia, la distribución de clases de la prueba, y una nota explicando por qué accuracy sola engaña bajo el desbalance. La línea base de clase mayoritaria ahora también reporta F1 macro y accuracy balanceada (además de accuracy y F1 ponderado, que se conservan).
+- `scripts/tune_rf.py`: el resumen muestra el `scoring` usado por `GridSearchCV` (`f1_macro`), su media ± desviación en validación cruzada, y compara por defecto vs. ajustado tanto en F1 macro/accuracy balanceada (principal) como en las métricas ponderadas (referencia).
+
+**Pruebas nuevas/actualizadas** (TDD, `tests/test_rf_tuning.py`):
+- `test_default_scoring_is_f1_macro` / `test_explicit_scoring_overrides_default`: espían la llamada a `GridSearchCV` (mock sobre `train_kmeans_rf_prod.GridSearchCV`) para verificar que `tune_classifier()` usa `scoring="f1_macro"` por defecto y respeta un `scoring` explícito.
+- `ClassifierMetricsTest`: `self.metrics` conserva las claves ponderadas existentes y agrega `f1_macro`/`balanced_accuracy` con valores iguales a los calculados independientemente por `sklearn` sobre las mismas predicciones de prueba.
+- `test_default_clf_params_are_the_tuned_values` (pinning test) y `test_custom_clf_params_are_applied_to_classifier`: actualizados (RED→GREEN) para los nuevos valores de `DEFAULT_CLF_PARAMS` (`max_depth=14`, `min_samples_leaf=5`).
+
+**Resultados reales** (`scripts/tune_rf.py`, `scripts/evaluate_model.py` sobre `Query_Result_V5.csv`, misma partición temporal 80/20 por producto; 24 combinaciones evaluadas, 5 folds mensuales, scoring=f1_macro, 154,8 s):
+
+- Mejores hiperparámetros: `n_estimators=300, max_depth=14, min_samples_leaf=5` (antes: `max_depth=None, min_samples_leaf=1`).
+- F1 macro en validación cruzada (media ± desviación): **0,4415 ± 0,0178**.
+
+Clasificador (prueba, n=9.578 — Reducir 7.595 / Mantener 337 / Reforzar 1.646):
+
+| Métrica | Anterior (max_depth=None, min_samples_leaf=1) | Nuevo (max_depth=14, min_samples_leaf=5) |
+|---|---|---|
+| Accuracy | 72,84 % | 68,31 % |
+| Accuracy balanceada | 48,73 % | **51,48 %** |
+| F1 (ponderado) | 74,26 % | 71,94 % |
+| F1 macro | 45,27 % | **46,06 %** |
+
+Por clase F1 (prueba):
+
+| Clase | Anterior | Nuevo |
+|---|---|---|
+| Reducir | 0,83 | 0,80 |
+| Mantener | 0,05 | 0,10 |
+| Reforzar | 0,48 | 0,48 |
+
+Línea base "siempre Reducir" (clase mayoritaria de entrenamiento): Accuracy 79,30 %, F1 ponderado 70,14 %, **F1 macro 29,48 %**, **accuracy balanceada 33,33 %**.
+
+**El modelo ajustado supera la línea base en F1 macro (46,06 % vs. 29,48 %) y en accuracy balanceada (51,48 % vs. 33,33 %), pero sigue por debajo en accuracy simple (68,31 % vs. 79,30 %)** — esperado y consistente con la razón del cambio: la línea base gana en accuracy únicamente porque ignora por completo las clases minoritarias, que es justo lo que F1 macro/accuracy balanceada penalizan y lo que el modelo, aunque de forma modesta, sí logra distinguir (recall de Mantener y Reforzar sube frente a la línea base, que tiene recall 0 en ambas). La clase "Mantener" sigue siendo la más débil del modelo (F1 0,10, 337 casos), aunque mejora respecto al ajuste anterior (0,05).
+
+El regresor no depende del clasificador y sus métricas no cambian: MAE 382.161,91, R² 0,6150, MASE 0,8743 (ver `outputs/reports/evaluacion_modelo.txt`).
+
+## [Corrección] - 2026-09-23
+
+### Fuga de calendario: `shift()`/`rolling()` operaban por fila, no por mes calendario
+
+**Problema**: `load_and_clean()` agrega el CSV crudo a una fila por producto-mes, pero **solo para los meses con ventas**: un mes sin ninguna venta no tiene fila. `build_features()` calcula `target`, `lag_k`, `mean_3`, `mean_6` y `media_3_actual` con `groupby(id).shift(...)`/`rolling(...)`, que operan sobre la POSICIÓN de la fila dentro de cada producto, no sobre el mes calendario. En `Query_Result_V5.csv`, el **40,2 % de las filas (11.764 de 29.284)** tenían un salto de más de 1 mes hasta la fila siguiente del mismo producto. Consecuencias:
+- `target` no era "ventas del mes calendario siguiente" sino "ventas del siguiente mes CON ventas" (podía saltarse meses en cero).
+- `lag_k`, `mean_3`, `mean_6`, `media_3_actual` eran "los k meses con ventas anteriores", no los k meses calendario anteriores.
+- Los meses con venta 0 no existían como observación: un producto que deja de venderse era invisible para la clase "Reducir" (nunca se generaba un `target=0` correspondiente a un mes calendario en cero).
+
+**Corrección** (`scripts/train_kmeans_rf_prod.py`), reglas aprobadas por el usuario (2026-09-23):
+- Nuevo método `_complete_calendar(df)`, llamado desde `load_and_clean()` justo después de la agregación (y de fijar `self._ultimo_mes`/`self._mes_pred`): completa el calendario de cada producto con una fila por mes, desde su PRIMER mes con ventas hasta el último mes GLOBAL del dataset (`self._ultimo_mes`), rellenando `sales`, `total_sold` y `frequency` con 0 en los meses sin ventas. `avg_price` se rellena con forward-fill (el último precio conocido del producto), porque no hay ninguna transacción de la que derivar un precio propio ese mes; `description` también se forward-fillea; `year`/`month` se recalculan de `fecha`. Imprime cuántas filas de venta 0 se agregaron.
+- Con el calendario completo, `target`/`lag_k`/`mean_3`/`mean_6`/`media_3_actual` (sin cambios de código en `build_features()`) pasan automáticamente a ser "por mes calendario", incluyendo correctamente los ceros.
+- Un mes calendario siguiente en 0 ahora produce naturalmente `growth_ratio = 0 < reduce_threshold` ⇒ clase "Reducir" (sin necesidad de una regla especial).
+- `_build_train_frame()`: se elimina el filtro `target > 0` (queda `target.notna() & (total_sold > 0)`); un mes siguiente en cero es una observación válida y necesaria para entrenar "Reducir". Solo se excluyen las filas cuyo MES ACTUAL no tuvo ventas (`total_sold == 0`), porque `growth_ratio` quedaría indefinido (división por cero) — usado por `cluster()`, `evaluate_k()` y `prepare_split()`.
+- `train_regressor()`: `tiene_target` pasa de `target > 0` a `target.notna()` (consistente con lo anterior); el regresor ahora entrena y evalúa también sobre `target=0` (`log1p(0)=0` no da problema numérico). La definición de MASE y de los baselines ingenuo/media_3 no cambia.
+- `prepare_split()`: `min_months` ahora cuenta meses **con ventas** (`total_sold > 0`) por producto, no filas de calendario — con el calendario completo, contar filas de calendario sobreestimaría el historial real de un producto con huecos. Las filas del último mes con `total_sold == 0` siguen excluidas de la predicción, igual que antes.
+- `DEFAULT_CLF_PARAMS`: recalculado con `tune_classifier()` sobre los datos ya con calendario completo (ver más abajo); `max_depth` pasa de `14` a `None`.
+- `scripts/app.py` no necesitó cambios: sigue llamando a los mismos métodos en el mismo orden.
+
+**Pruebas nuevas**: `tests/test_monthly_calendar.py` (9 casos): una fila con mes faltante recibe `total_sold=0` y precio forward-filled; no quedan huecos de calendario (filas consecutivas por producto difieren en exactamente 1 mes); el calendario arranca en el primer mes con ventas de cada producto y termina en el último mes global; el `target` del mes anterior a un mes en cero es 0 y su `target_class` es 0 (Reducir) en `_df_train`; `lag_1` es el `total_sold` del mes CALENDARIO anterior (0 si ese mes no tuvo ventas); las filas con `total_sold` actual en 0 no entran a `_df_train`; `min_months` cuenta meses con ventas y no filas de calendario. `tests/_helpers.py`: `synthetic_history()` gana un parámetro opcional `drop_months` para simular productos con huecos sin romper las llamadas existentes (por defecto no omite ningún mes). `tests/test_rf_tuning.py`: se actualiza `test_default_clf_params_are_the_tuned_values` (RED→GREEN, TDD) para esperar `max_depth=None` en vez de `14`, junto con el cambio de `DEFAULT_CLF_PARAMS`.
+
+**Nota metodológica**: las cifras de la corrección anterior (clasificador Acc 64,12 % / Prec 63,93 % / Rec 64,12 % / F1 64,02 %; regresor MAE 460.968 / RMSE 1.288.345 / R² 0,6114 / MASE 1,0954; baselines ingenuo MAE 616.270 / R² 0,3793 / MASE 1,4645, media_3 MAE 531.697 / R² 0,5851 / MASE 1,2635) quedan **superadas**: se calcularon sobre una serie por fila (sin calendario), no por mes calendario, y por lo tanto no son comparables con las siguientes.
+
+**Selección de k tras el completado de calendario** (`scripts/select_k.py`, sobre la partición de entrenamiento, ahora 23.720 filas en vez de 16.368-ish previas):
+
+| k | Inercia | Silueta |
+|---|---|---|
+| 2 | 21.873,39 | 0,3597 |
+| **3** | **14.473,17** | **0,3782** |
+| 4 | 11.730,33 | 0,3275 |
+| 5 | 9.610,21 | 0,3348 |
+| 6 | 8.212,69 | 0,3360 |
+| 7 | 7.234,13 | 0,3457 |
+| 8 | 6.483,72 | 0,3165 |
+| 9 | 5.904,14 | 0,3212 |
+| 10 | 5.437,75 | 0,3223 |
+
+k=3 **sigue siendo el máximo de silueta** (0,3782, antes 0,3695); no se modifica `n_clusters` (sigue en 3).
+
+**Ajuste de hiperparámetros tras el completado de calendario** (`scripts/tune_rf.py`, misma grilla y `TimeSeriesSplit` mensual):
+
+- Mejores hiperparámetros: `max_depth=None, min_samples_leaf=1, n_estimators=300` (antes: `max_depth=14`). **`DEFAULT_CLF_PARAMS` se actualiza** a `max_depth=None`.
+- F1 ponderado en validación cruzada (media ± desviación): **0,6400 ± 0,0159** (antes 0,6041 ± 0,0138).
+- Métricas de prueba (holdout, promedio ponderado):
+
+| Métrica | Por defecto (max_depth=14) | Ajustado (max_depth=None) |
+|---|---|---|
+| Accuracy | 70,27 % | 72,84 % |
+| Precision | 78,59 % | 77,63 % |
+| Recall | 70,27 % | 72,84 % |
+| F1 | 72,96 % | 74,26 % |
+
+**Evaluación completa tras el completado de calendario** (`scripts/evaluate_model.py`, top 1.900 productos, 16.242 filas de entrenamiento / 5.038 de prueba para el regresor; 9.578 filas de prueba para el clasificador — antes 5.077 y ~4.756 respectivamente, porque el calendario completo agrega muchas más filas con `target`/`total_sold` válidos):
+
+Clasificador (prueba, promedio ponderado):
+
+| Métrica | Anterior (sin calendario) | Nuevo (con calendario) |
+|---|---|---|
+| Accuracy | 64,12 % | 72,84 % |
+| Precision | 63,93 % | 77,63 % |
+| Recall | 64,12 % | 72,84 % |
+| F1 | 64,02 % | 74,26 % |
+
+Línea base de clase mayoritaria (ahora "Reducir", antes "Reforzar" — el completado de calendario agrega muchísimas filas cuyo mes siguiente es cero, así que "Reducir" pasa a ser la clase ampliamente dominante en entrenamiento):
+
+| Métrica | Modelo | Línea base (clase mayoritaria = "Reducir") |
+|---|---|---|
+| Accuracy | 72,84 % | **79,30 %** |
+| F1 | 74,26 % | 70,14 % |
+
+Reporte por clase (prueba):
+
+```
+              precision    recall  f1-score   support
+     Reducir       0.89      0.78      0.83      7595
+    Mantener       0.08      0.04      0.05       337
+    Reforzar       0.38      0.65      0.48      1646
+```
+
+Matriz de confusión (filas = real, columnas = predicha; orden Reducir/Mantener/Reforzar):
+
+```
+Reducir  : [5895,  107, 1593]
+Mantener : [ 152,   12,  173]
+Reforzar : [ 550,   26, 1070]
+```
+
+Regresor (prueba, top productos, `n_test=5.038`):
+
+| Métrica | Modelo | Ingenuo | Media_3 |
+|---|---|---|---|
+| MAE | 382.161,91 | 645.453,24 | 494.885,24 |
+| MSE | 1,4996e+12 | 2,7360e+12 | 1,5266e+12 |
+| RMSE | 1.224.573,75 | 1.654.083,12 | 1.235.545,14 |
+| R² | 0,6150 | 0,2976 | 0,6081 |
+| MASE | **0,8743** | 1,4766 | 1,1322 |
+
+**¿El modelo sigue superando cada línea base?** Dicho sin adornos:
+- **Regresor: sí, en las cinco métricas** frente a ambos baselines (menor MAE/MSE/RMSE/MASE, mayor R²). Además, a diferencia de la corrección anterior, el **MASE del modelo ahora es 0,8743 (< 1)**: el error absoluto medio del modelo en prueba es menor que el error absoluto medio del pronóstico ingenuo observado en entrenamiento (la escala de MASE), no solo menor que el ingenuo evaluado en las mismas filas de prueba.
+- **Clasificador: en F1 sí (74,26 % vs 70,14 %), pero en Accuracy NO** — la línea base de "siempre predecir Reducir" alcanza 79,30 % de accuracy, **5 puntos por encima del modelo (72,84 %)**. Esto ocurre porque el calendario completo hace que "Reducir" (target=0 o caída) sea abrumadoramente la clase mayoritaria (7.595 de 9.578 filas de prueba, 79 %); un clasificador trivial que siempre predice "Reducir" ya acierta esa proporción. El modelo sacrifica accuracy global a cambio de detectar mejor las clases minoritarias "Reforzar" (recall 0,65 vs 0 del baseline) y, débilmente, "Mantener" (recall 0,04): eso es lo que refleja el F1 ponderado más alto, no la accuracy.
+
+**Concernientes a documentar honestamente**:
+- La clase "Mantener" es ahora aún más débil que antes (F1 0,05, recall 0,04, solo 337 casos de soporte en prueba): el modelo casi nunca la predice correctamente.
+- La comparación de accuracy contra la línea base de clase mayoritaria empeoró respecto a la corrección anterior (antes el modelo ganaba +22,2 puntos de accuracy; ahora pierde -6,46 puntos), precisamente porque el desbalance de clases se agravó al completar el calendario (más filas "Reducir" reales). El F1 ponderado sigue favoreciendo al modelo, pero no se debe citar solo la accuracy sin esta salvedad.
+- Estos números son metodológicamente más correctos que los anteriores (calendario completo = comparación real mes a mes), pero exponen que el problema es más difícil de lo que parecía: antes la ausencia de meses en cero ocultaba parte de la dificultad real de distinguir "Reducir" de "Mantener".
+
+---
+
+## [Corrección] - 2026-09-22 (regresor)
+
+### Fuga de datos en el regresor + métricas de regresión (MAE, RMSE, R², MASE) y baselines
+
+**Problema**: `train_regressor()` seleccionaba `self._top_prods` (los `top_n_products` con más ventas) sumando `TOTAL_VENDIDO` sobre **todas** las filas de `_df_train`, incluyendo la partición de prueba, y luego entrenaba el `RandomForestRegressor` con **todas** esas filas (entrenamiento + prueba). El regresor nunca se evaluaba: no había MAE, MSE, RMSE, R² ni MASE, ni una línea base ingenua con la que compararlo (pendiente técnico señalado en la auditoría de 2026-09-22, ver `CLAUDE.md`).
+
+**Cambio** (`scripts/train_kmeans_rf_prod.py`):
+- `_top_prods` ahora se calcula únicamente con `self._df_train.loc[self._train_idx]` (partición de entrenamiento).
+- El `RandomForestRegressor` se entrena únicamente con filas de entrenamiento de esos top productos (`target > 0`), sobre `self.scaler.transform(X)` y `log1p(target)`, igual que antes.
+- Se evalúa en la partición de **prueba** de los mismos productos: predicciones revertidas a escala original con `expm1`. Se guarda `self.reg_metrics` (`mae`, `mse`, `rmse`, `r2`, `mase`, `n_test`) y `self.reg_test_results` (real vs. predicho, para graficar).
+- **Definición de MASE**: `mase = mae_modelo / escala`, donde `escala = media(|target − TOTAL_VENDIDO|)` del pronóstico ingenuo (el mes actual predice el mes siguiente) calculada **solo sobre la partición de entrenamiento** de los top productos (no sobre prueba, para no filtrar información de prueba en la escala de referencia).
+- Se agregan dos baselines evaluados sobre las mismas filas de prueba, guardados en `self.baseline_metrics`:
+  - `ingenuo`: predice el mes siguiente igual al `TOTAL_VENDIDO` del mes actual.
+  - `media_3`: predice la media móvil de 3 meses **incluyendo el mes actual** (columna nueva `media_3_actual`, sin `shift`; distinta de `mean_3`, que sí lleva `shift(1)` y se usa como feature del modelo). Si un producto no tiene historial suficiente (`NaN`), se usa el valor ingenuo como respaldo para esa fila.
+- Nuevo script `scripts/evaluate_model.py`: corre el pipeline hasta `train_regressor()` sobre `Query_Result_V5.csv`, exporta `outputs/reports/evaluacion_modelo.txt` (métricas del clasificador + línea base de clase mayoritaria + matriz de confusión + tabla de regresión), `outputs/figures/matriz_confusion.png` y `outputs/figures/real_vs_predicho.png` (dispersión real vs. predicho, escala log-log).
+- Tests nuevos en `tests/test_regression_metrics.py` (8 casos): verifican que el ajuste del regresor no usa filas de prueba (espiando `RandomForestRegressor.fit`), que `reg_metrics` tiene las claves esperadas con valores finitos y `rmse == sqrt(mse)`, que el MASE coincide con `mae / escala` calculada de forma independiente sobre entrenamiento, que el baseline `ingenuo` es coherente con un cálculo independiente sobre prueba, y que `_top_prods` ignora las filas de prueba (caso construido: se infla artificialmente `TOTAL_VENDIDO` solo en las filas de prueba de un producto para comprobar que NO pasa a ser top si la selección es correcta).
+
+**Resultado sobre `Query_Result_V5.csv`** (`scripts/evaluate_model.py`, top 1900 productos, 16.368 filas de entrenamiento / 5.077 de prueba para el regresor):
+
+Clasificador (prueba, promedio ponderado) — sin cambios respecto al ajuste de hiperparámetros ya adoptado:
+
+| Métrica | Modelo | Línea base (clase mayoritaria = "Reforzar") |
+|---|---|---|
+| Accuracy | 64,12 % | 41,95 % |
+| Precision | 63,93 % | — |
+| Recall | 64,12 % | — |
+| F1 | 64,02 % | 24,79 % |
+
+Matriz de confusión (filas = real, columnas = predicha; orden Reducir/Mantener/Reforzar):
+
+```
+Reducir  : [2987,  176,  857]
+Mantener : [ 233,   98,  345]
+Reforzar : [ 903,  388, 2102]
+```
+
+Regresor (prueba, top productos, `n_test=5.077`):
+
+| Métrica | Modelo | Ingenuo | Media_3 |
+|---|---|---|---|
+| MAE | 460.968,18 | 616.270,36 | 531.697,06 |
+| MSE | 1.659.832.486.940,06 | 2.651.254.383.132,88 | 1.772.192.485.460,91 |
+| RMSE | 1.288.344,86 | 1.628.267,29 | 1.331.237,20 |
+| R² | 0,6114 | 0,3793 | 0,5851 |
+| MASE | 1,0954 | 1,4645 | 1,2635 |
+
+**El modelo supera a ambos baselines (ingenuo y media_3) en las cinco métricas** (menor MAE/MSE/RMSE/MASE, mayor R²) — dicho sin adornos, sí mejora frente a las líneas base ingenuas sobre la partición de prueba. El clasificador también supera ampliamente la línea base de clase mayoritaria (+22,2 puntos de accuracy, +39,2 puntos de F1 ponderado).
+
+**Limitación a documentar honestamente**: el MASE del modelo es **1,0954, mayor a 1**. Esto significa que, aunque el modelo comete menos error absoluto que los baselines *sobre la partición de prueba*, su error absoluto medio en prueba es ligeramente **mayor** que el error absoluto medio del pronóstico ingenuo observado *en entrenamiento* (la escala de MASE). Es decir, el desempeño del pronóstico ingenuo se degrada más entre entrenamiento y prueba que el del modelo, pero ninguno de los dos "gana" en términos absolutos frente al comportamiento histórico de entrenamiento. No se debe presentar el MASE < 1 como si el modelo superara al ingenuo en términos absolutos: la comparación válida contra baselines es la de la tabla anterior (mismas filas de prueba para los tres), donde el modelo sí gana en las cinco métricas.
+
+---
+
+## [Mejora] - 2026-09-22 (adopción)
+
+### Hiperparámetros ajustados como valores por defecto
+
+`DEFAULT_CLF_PARAMS` pasa de `n_estimators=300, max_depth=10, min_samples_leaf=3` a `n_estimators=300, max_depth=14, min_samples_leaf=1` (mejor combinación de `tune_classifier()`).
+
+Métricas de prueba sobre V5 con los nuevos valores por defecto: Accuracy 64,12 %, Precision 63,93 %, Recall 64,12 %, F1 64,02 %.
+
+Nota metodológica: en la validación cruzada, las cinco mejores combinaciones quedan dentro de una desviación estándar (F1 0,6026–0,6041, σ ≈ 0,014); la mejora frente a los valores anteriores es moderada.
+
+---
+
+## [Mejora] - 2026-09-22 (ajuste de hiperparámetros)
+
+### Ajuste de hiperparámetros del clasificador con validación cruzada (`GridSearchCV` + `TimeSeriesSplit` mensual)
+
+**Problema**: los hiperparámetros del `RandomForestClassifier` (`n_estimators=300, max_depth=10, min_samples_leaf=3`) estaban fijados manualmente, sin ningún método de búsqueda ni validación cruzada (actividad A10 del anteproyecto pendiente).
+
+**Cambio**:
+- `SalesForecastModel` acepta `clf_params` en el constructor (`self.clf_params = {**DEFAULT_CLF_PARAMS, **clf_params}`); `train_classifier()` usa `self.clf_params` en vez de valores hardcodeados, así que el comportamiento por defecto no cambia si no se especifica `clf_params`.
+- Nuevo método `_monthly_time_series_folds(dates, n_splits)`: aplica `TimeSeriesSplit` sobre los MESES únicos (no sobre las filas) para que ningún mes quede partido entre entrenamiento y validación, y todo mes de validación sea estrictamente posterior a los meses de entrenamiento del fold.
+- Nuevo método `tune_classifier(param_grid=None, n_splits=5, scoring="f1_weighted")`: ejecuta `GridSearchCV` con un `Pipeline` (`RobustScaler` + `RandomForestClassifier`) sobre esos folds, usando **solo la partición de entrenamiento** (`self._train_idx`); el escalador se reajusta en cada fold para no filtrar estadísticos entre folds. Guarda `self.tuning_results` (tabla completa de `cv_results_`) y `self.best_clf_params`, sin modificar `self.clf_params` automáticamente.
+- Nuevo script `scripts/tune_rf.py`: corre el pipeline completo, entrena con los hiperparámetros por defecto, ajusta con `GridSearchCV` y reentrena con los mejores hiperparámetros, comparando métricas de prueba (holdout) antes/después.
+
+**Resultado sobre `Query_Result_V5.csv`** (grilla `n_estimators: [200, 300]`, `max_depth: [6, 10, 14, None]`, `min_samples_leaf: [1, 3, 5]`, 5 folds mensuales, `scoring=f1_weighted`, `scripts/tune_rf.py`):
+
+- Mejores hiperparámetros: `max_depth=14, min_samples_leaf=1, n_estimators=300`.
+- F1 ponderado en validación cruzada (media ± desviación): **0,6041 ± 0,0138**.
+- Métricas de prueba (holdout, promedio ponderado):
+
+| Métrica | Por defecto | Ajustado |
+|---|---|---|
+| Accuracy | 62,26 % | 64,12 % |
+| Precision | 64,35 % | 63,93 % |
+| Recall | 62,26 % | 64,12 % |
+| F1 | 62,91 % | 64,02 % |
+
+El ajuste mejora Accuracy, Recall y F1 (~+1,1 a +1,9 puntos porcentuales) y mantiene Precision prácticamente igual (-0,42 puntos). Tabla completa de la búsqueda: `outputs/reports/tuning_rf_clasificador.csv`; resumen: `outputs/reports/tuning_rf_resumen.txt`.
+
+**Limitación**: la variable `cluster` (una de las features del clasificador) proviene del KMeans ajustado una sola vez sobre TODA la partición de entrenamiento (`cluster()`), no se refita dentro de cada fold de la validación cruzada; por lo tanto esa parte de la información (aunque solo del conjunto de entrenamiento, sin fuga hacia prueba) sí se comparte entre folds.
+
+---
+
+## [Mejora] - 2026-09-22
+
+### Transformación logarítmica en el clustering y justificación de k=3
+
+**Problema**: con las variables en escala original, la silueta máxima era k=2 (0,95), pero ese agrupamiento solo aislaba 72 registros de ventas extremas frente a 21.123; no representaba segmentos de productos.
+
+**Cambio**: las variables de clustering (ventas, frecuencia, precio) se transforman con `log1p` antes del `RobustScaler` (`_cluster_features`), tanto en `cluster()` como en `evaluate_k()`. Se mantiene k=3.
+
+**Selección de k sobre `Query_Result_V5.csv`** (partición de entrenamiento, `scripts/select_k.py`):
+
+| k | Inercia | Silueta |
+|---|---|---|
+| 2 | 20.162,2 | 0,3493 |
+| **3** | **13.248,3** | **0,3695** |
+| 4 | 10.718,8 | 0,3225 |
+| 5 | 8.786,5 | 0,3284 |
+| 6 | 7.488,4 | 0,3285 |
+| 7 | 6.563,4 | 0,3418 |
+| 8 | 5.903,6 | 0,3142 |
+| 9 | 5.356,2 | 0,3201 |
+| 10 | 4.897,5 | 0,3196 |
+
+k=3 obtiene la silueta máxima, coincide con el codo de la inercia y produce segmentos equilibrados (4.588 / 9.531 / 7.076 registros).
+
+**Métricas del clasificador (promedio ponderado)**: Accuracy 62,16 → 62,26 %, Precision 64,16 → 64,35 %, Recall 62,16 → 62,26 %, F1 62,75 → 62,91 %.
+
+---
+
+## [Corrección] - 2026-09-22 (KMeans)
+
+### Fuga de datos en el clustering + selección de k (`train_kmeans_rf_prod.py`)
+
+**Problema**: `cluster()` ajustaba `RobustScaler` y `KMeans` con TODAS las filas de `self.df` (incluyendo el período de prueba y el mes a predecir), es decir, la misma fuga de datos que ya se había corregido en el escalador del clasificador. Además, `k=3` estaba fijado sin evidencia (sin método del codo ni coeficiente de silueta).
+
+**Corrección**:
+- Se extrajo el filtro de filas de entrenamiento y el split temporal por producto a un helper compartido (`_build_train_frame()`), usado tanto por `cluster()` como por `prepare_split()`, para que ambos entrenen con exactamente la misma partición.
+- `cluster()` ahora ajusta el escalador (`self.cluster_scaler`) y KMeans (`self.kmeans`) solo con la partición de entrenamiento, y luego asigna cluster a todas las filas de `self.df` (prueba y mes a predecir) con `predict()`.
+- Se agregó `evaluate_k(k_range, sample_size)`, que calcula inercia y silueta para un rango de k sobre la partición de entrenamiento (sin fuga), sin modificar `self.n_clusters` ni el estado del pipeline.
+- Nuevo script `scripts/select_k.py` que ejecuta `evaluate_k` sobre `Query_Result_V5.csv` y exporta tabla + gráfico (codo y silueta).
+
+**Resultado de `select_k.py` sobre `Query_Result_V5.csv`** (k evaluado de 2 a 10, sobre la partición de entrenamiento):
+
+| k | Inercia | Silueta |
+|---|---|---|
+| 2 | 690563,58 | 0,9485 |
+| 3 | 501512,56 | 0,8315 |
+| 4 | 419882,47 | 0,7635 |
+| 5 | 350324,75 | 0,7303 |
+| 6 | 287355,06 | 0,6632 |
+| 7 | 241275,30 | 0,6614 |
+| 8 | 199370,31 | 0,6571 |
+| 9 | 171041,06 | 0,6353 |
+| 10 | 155281,90 | 0,6095 |
+
+k con mayor silueta: **2** (por decidir: el modelo en producción se mantiene con `n_clusters=3`, valor que se conserva sin cambios hasta que se decida explícitamente si se ajusta).
+
+**Impacto en el clasificador** (V5, promedio ponderado, 3 clases; la variable `cluster` es una de las features del clasificador, por eso cambia levemente al corregir la fuga del clustering):
+
+| Métrica | Antes (solo fix de escalador) | Después (fix de KMeans) |
+|---|---|---|
+| Accuracy | 62,29 % | 62,16 % |
+| Precision | 64,22 % | 64,16 % |
+| Recall | 62,29 % | 62,16 % |
+| F1 | 62,89 % | 62,75 % |
+
+**Prueba**: `tests/test_kmeans_selection.py` (`python -m unittest tests.test_kmeans_selection`).
+
+---
+
+## [Corrección] - 2026-09-22
+
+### Fuga de datos en el escalado (`train_kmeans_rf_prod.py`)
+
+**Problema**: `RobustScaler` se ajustaba con todas las filas antes de la división temporal, por lo que las métricas de prueba incorporaban estadísticos (mediana e IQR) del conjunto de prueba.
+
+**Corrección**: la división temporal por producto se calcula primero; el escalador se ajusta solo con las filas de entrenamiento y luego transforma todo el conjunto.
+
+**Impacto medido sobre `Query_Result_V5.csv`** (promedio ponderado, 3 clases):
+
+| Métrica | Antes | Después |
+|---|---|---|
+| Accuracy | 62,32 % | 62,29 % |
+| Precision | 64,24 % | 64,22 % |
+| Recall | 62,32 % | 62,29 % |
+| F1 | 62,92 % | 62,89 % |
+
+El impacto es mínimo porque Random Forest es invariante a transformaciones monótonas de escala; la corrección garantiza la validez metodológica de la evaluación.
+
+**Prueba**: `tests/test_scaler_no_leakage.py` (`python -m unittest tests.test_scaler_no_leakage`).
+
+---
+
 ## [Refactorización] - 2026-05-26
 
 ### 🎯 Refactorización de `train_kmeans_rf_prod.py` → Clase Reutilizable
