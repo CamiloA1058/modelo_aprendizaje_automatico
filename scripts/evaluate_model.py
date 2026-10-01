@@ -166,7 +166,7 @@ def main():
 
     # ── Figura: matriz de confusión ───────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(matriz, cmap="Blues")
+    im = ax.imshow(matriz, cmap="Greens")
     ax.set_title("Matriz de confusión — clasificador")
     ax.set_xlabel("Clase predicha")
     ax.set_ylabel("Clase real")
@@ -194,12 +194,12 @@ def main():
     predicho  = tabla["predicho"].to_numpy()
 
     fig2, ax2 = plt.subplots(figsize=(6, 6))
-    ax2.scatter(real, predicho, alpha=.6, color="#1D4ED8", s=30)
+    ax2.scatter(real, predicho, alpha=.6, color="#d55181", s=30)
 
     minimo = max(min(real.min(), predicho.min()), 1e-6)
     maximo = max(real.max(), predicho.max())
     ax2.plot([minimo, maximo], [minimo, maximo],
-             linestyle="--", color="#DC2626", label="y = x")
+             linestyle="--", color="#52514e", label="y = x")
 
     ax2.set_xscale("log")
     ax2.set_yscale("log")

@@ -45,7 +45,7 @@ def main():
 
     # ── Gráfico: codo + silueta ───────────────────────────────────────────────
     fig, (ax_codo, ax_silueta) = plt.subplots(1, 2, figsize=(14, 5))
-    color = "#1D4ED8"
+    color = "#e34948"
 
     ax_codo.plot(tabla["k"], tabla["inercia"], marker="o", color=color)
     ax_codo.set_title("Método del codo")
@@ -57,7 +57,7 @@ def main():
     fila_optima = tabla.loc[tabla["silueta"].idxmax()]
     ax_silueta.scatter(
         [fila_optima["k"]], [fila_optima["silueta"]],
-        s=140, marker="*", color="#DC2626", zorder=5,
+        s=140, marker="*", color="#eda100", zorder=5,
         label=f"k óptimo = {int(fila_optima['k'])}",
     )
     ax_silueta.annotate(

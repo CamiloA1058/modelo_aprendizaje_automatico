@@ -397,8 +397,8 @@ def build_figure(res_clf, res_reg_b, salida):
     modelos_clf = list(res_clf.keys())
     x = np.arange(len(modelos_clf))
     ancho = 0.35
-    color_f1 = "#2a78d6"   # paleta categórica de referencia, posición 1
-    color_bal = "#eb6834"  # posición 2
+    color_f1 = "#1baf7a"   # paleta categórica de referencia, posición 3
+    color_bal = "#4a3aa7"  # posición 7
 
     f1_macro = [res_clf[m]["f1_macro"] for m in modelos_clf]
     bal_acc = [res_clf[m]["balanced_accuracy"] for m in modelos_clf]
@@ -417,7 +417,7 @@ def build_figure(res_clf, res_reg_b, salida):
     modelos_mase = sorted(res_reg_b.keys(), key=lambda m: res_reg_b[m]["mase"])
     valores_mase = [res_reg_b[m]["mase"] for m in modelos_mase]
 
-    ax2.barh(modelos_mase, valores_mase, color="#2a78d6")
+    ax2.barh(modelos_mase, valores_mase, color="#eb6834")
     # Línea de referencia en tinta neutra (el rojo queda reservado para
     # estados); su etiqueta va arriba del panel para no chocar con el eje X.
     ax2.axvline(1.0, color="#52514e", linestyle="--", linewidth=1.2)

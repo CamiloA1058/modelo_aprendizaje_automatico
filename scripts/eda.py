@@ -47,7 +47,10 @@ from ventas_forecast.eda import (  # noqa: E402
 from train_kmeans_rf_prod import SalesForecastModel, DEFAULT_COL_MAP  # noqa: E402
 
 # ── Paleta (misma referencia usada en el resto del proyecto) ────────────────
-COLOR_LINEA   = "#2a78d6"
+COLOR_LINEA   = "#008300"   # Figura de ventas mensuales
+COLOR_ESTACION = "#eb6834"  # Figura de estacionalidad
+COLOR_PARETO   = "#199e70"  # Figura de Pareto ABC
+COLOR_HIST     = "#4a3aa7"  # Figura de distribución de ventas
 COLOR_GRID    = "#e1e0d9"
 COLOR_INK     = "#52514e"
 COLOR_MUTED   = "#898781"
@@ -360,7 +363,7 @@ def main():
 
     fig, ax = plt.subplots(figsize=(10, 5))
     _estilo_ejes(ax, fig)
-    barras = ax.bar(MESES_ES, valores_plot, color=COLOR_LINEA, width=0.7)
+    barras = ax.bar(MESES_ES, valores_plot, color=COLOR_ESTACION, width=0.7)
     ax.set_ylim(bottom=0)
     ax.grid(axis="y", color=COLOR_GRID, linewidth=0.8)
     ax.set_axisbelow(True)
@@ -395,7 +398,7 @@ def main():
     ax.axvspan(0, corte_ab, color=COLOR_FILL_A, zorder=0)
     ax.axvspan(corte_ab, corte_bc, color=COLOR_SURFACE, zorder=0)
     ax.axvspan(corte_bc, 100, color=COLOR_FILL_A, zorder=0)
-    ax.plot(x_pct, y_pct, color=COLOR_LINEA, linewidth=2, zorder=3)
+    ax.plot(x_pct, y_pct, color=COLOR_PARETO, linewidth=2, zorder=3)
     ax.axvline(corte_ab, color=COLOR_MUTED, linestyle="--", linewidth=1, zorder=2)
     ax.axvline(corte_bc, color=COLOR_MUTED, linestyle="--", linewidth=1, zorder=2)
 
@@ -433,7 +436,7 @@ def main():
 
     fig, ax = plt.subplots(figsize=(9, 5))
     _estilo_ejes(ax, fig)
-    ax.hist(positivos, bins=bins, color=COLOR_LINEA)
+    ax.hist(positivos, bins=bins, color=COLOR_HIST)
     ax.set_xscale("log")
     ax.set_xlabel("Ventas del mes por producto (COP, escala log)")
     ax.set_ylabel("Número de observaciones producto-mes")
