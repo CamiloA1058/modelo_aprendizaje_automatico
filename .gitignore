@@ -14,3 +14,6 @@ outputs/
 # Logs y temporales
 *.log
 *.tmp
+
+# Marcador local del lanzador del dashboard (no versionar)
+scripts/.deps_ok
