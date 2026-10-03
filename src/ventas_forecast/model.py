@@ -580,7 +580,7 @@ class SalesForecastModel:
 
         self.metrics = {
             # Ponderadas por soporte de clase (mantenidas por compatibilidad:
-            # scripts/app.py las lee tal cual). Bajo el desbalance de clases
+            # dashboard/app.py las lee tal cual). Bajo el desbalance de clases
             # de este problema (Reducir 79,30 % de la prueba) el promedio
             # ponderado —y sobre todo accuracy— está dominado por la clase
             # mayoritaria y puede mejorar aunque el modelo empeore en

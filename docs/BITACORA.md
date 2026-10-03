@@ -1,3 +1,5 @@
+> Nota (2026-10-03): este documento es histórico. Las rutas de archivos citadas son las de su fecha; ver la tabla de rutas antiguas y nuevas en `docs/CHANGELOG.md` (entrada "Reestructuración").
+
 # 📋 BITÁCORA DE DESARROLLO - Modelo K-Means + Random Forest
 
 **Proyecto**: Predicción de Ventas Mensuales  

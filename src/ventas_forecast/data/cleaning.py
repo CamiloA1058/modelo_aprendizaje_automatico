@@ -133,7 +133,7 @@ class DatasetCleaner:
         Envoltorio de conveniencia sobre remove_bulk_adjustments() (función
         de módulo, ver más abajo) que opera in-place sobre self.df y
         devuelve el resumen de filas eliminadas. Útil para reutilizar esta
-        regla en scripts de limpieza offline como data/raw/cleaner.py.
+        regla en scripts de limpieza offline como data/historico/cleaner.py.
         """
         if self.df is None:
             raise Exception("Primero debes cargar el dataset.")

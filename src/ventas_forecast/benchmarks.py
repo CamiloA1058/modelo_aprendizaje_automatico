@@ -2,7 +2,7 @@
 benchmarks.py
 =============
 Utilidades genéricas para comparar modelos de pronóstico sobre las MISMAS
-filas/partición que scripts/train_kmeans_rf_prod.SalesForecastModel, usadas
+filas/partición que ventas_forecast.model.SalesForecastModel, usadas
 por scripts/compare_models.py:
 
   - rolling_one_step_forecast(): pronóstico a un paso re-entrenado mes a

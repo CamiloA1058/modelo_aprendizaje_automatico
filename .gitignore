@@ -18,9 +18,6 @@ outputs/
 # Marcador local del lanzador del dashboard (no versionar)
 .deps_ok
 
-# Subidas en tiempo de ejecucion del dashboard (viven en outputs/uploads)
-scripts/uploads/
-dashboard/uploads/
 
 # Herramientas locales de agentes y notas de trabajo
 .agents/

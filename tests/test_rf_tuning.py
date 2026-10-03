@@ -185,7 +185,7 @@ class ClassifierMetricsTest(unittest.TestCase):
     """(b) self.metrics agrega f1_macro y balanced_accuracy, con valores
     que coinciden con los calculados independientemente por sklearn sobre
     las mismas predicciones de prueba (además de las claves ponderadas
-    existentes, que scripts/app.py sigue leyendo sin cambios)."""
+    existentes, que dashboard/app.py sigue leyendo sin cambios)."""
 
     def setUp(self):
         self.model = _build_model()

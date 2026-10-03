@@ -2,9 +2,9 @@
 
 Sistema de predicción de ventas y decisiones de stock (Reforzar / Mantener / Reducir) utilizando K-Means + Random Forest.
 
-**Modelo final (producción)**: `scripts/train_kmeans_rf_prod.py` (clase `SalesForecastModel`)  
-**`scripts/train_kmeans_rf.py`** ("predicción por ítem") es **legacy**: no forma parte del modelo final, no lo importa ningún script de producción, evaluación o comparación, y el dashboard (`scripts/app.py`) solo usa `train_kmeans_rf_prod`.  
-**Modelos de comparación** (benchmark): `scripts/compare_models.py` (RF vs XGBoost vs Prophet vs ARIMA, sobre la misma partición del modelo final); `scripts/run_xgboost.py` y `scripts/run_prophet.py` quedan sustituidos por `compare_models.py` para efectos del trabajo de grado.
+**Modelo final (producción)**: `src/ventas_forecast/model.py` (clase `SalesForecastModel`), que se entrena con `scripts/entrenar.py` o desde el dashboard (`dashboard/app.py`).  
+**Código heredado** (no es producción): `legacy/` (primeros pipelines, versiones 1.0 y 2.0, benchmarks sueltos de XGBoost/Prophet).  
+**Modelos de comparación** (benchmark): `scripts/compare_models.py` (RF vs XGBoost vs Prophet vs ARIMA, sobre la misma partición del modelo final).
 
 Dataset vigente: `data/raw/Query_Result_V5.csv` (extracción de ventas reales del taller de los últimos dos años; 78.921 registros diarios, 5.654 productos, 5.074 tras la limpieza de ajustes masivos de inventario).
 
@@ -39,135 +39,159 @@ Ver [docs/CHANGELOG.md](docs/CHANGELOG.md) para el historial completo de decisio
 
 ---
 
+## Inicio rápido
+
+**Windows (cliente final)**: doble clic en `Iniciar_Dashboard.bat`. Usa `.venv` si existe, instala las dependencias la primera vez y abre `http://localhost:5000`.
+
+**Desarrollador**:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python dashboard/app.py          # dashboard en http://localhost:5000
+python scripts/entrenar.py       # entrena y escribe outputs/predictions/PREDICCION_MENSUAL.csv
+```
+
+Usar `PYTHONIOENCODING=utf-8` para evitar errores de consola con los caracteres ✓/✅/❌. `scripts/entrenar.py` termina mostrando una figura con matplotlib; en entornos sin pantalla definir `MPLBACKEND=Agg`.
+
+---
+
 ## Estructura del proyecto
 
 ```
 modelo_aprendizaje_automatico/
-│
 ├── README.md
-├── requirements.txt
+├── requirements.txt             # Dependencias únicas (modelo, dashboard, benchmarks)
+├── Iniciar_Dashboard.bat        # Lanzador Windows, doble clic
 │
-├── src/ventas_forecast/          # Código compartido
-│   ├── paths.py                  # Rutas centralizadas
-│   ├── eda.py                    # Funciones de análisis exploratorio
-│   ├── benchmarks.py             # Utilidades de comparación RF/XGBoost/Prophet/ARIMA
-│   └── data/cleaning.py          # DatasetCleaner + remove_bulk_adjustments
+├── src/ventas_forecast/         # Código compartido
+│   ├── model.py                 # Modelo FINAL: SalesForecastModel
+│   ├── paths.py                 # Rutas centralizadas (DEFAULT_DATASET, UPLOADS, ...)
+│   ├── eda.py                   # Funciones de análisis exploratorio
+│   ├── benchmarks.py            # Utilidades de comparación RF/XGBoost/Prophet/ARIMA
+│   └── data/cleaning.py         # DatasetCleaner + remove_bulk_adjustments
 │
-├── scripts/                      # Scripts ejecutables
-│   ├── train_kmeans_rf_prod.py   # Modelo FINAL (producción) — SalesForecastModel
-│   ├── train_kmeans_rf.py        # LEGACY — predicción por ítem, no usado por el modelo final
-│   ├── select_k.py               # Selección de k (codo + silueta) para K-means
-│   ├── tune_rf.py                # Ajuste de hiperparámetros del clasificador (GridSearchCV)
-│   ├── evaluate_model.py         # Evaluación del clasificador y el regresor
-│   ├── compare_models.py         # Comparación RF vs XGBoost vs Prophet vs ARIMA
-│   ├── eda.py                    # Reporte y figuras de análisis exploratorio
-│   ├── run_xgboost.py, run_prophet.py  # Benchmarks antiguos (sustituidos por compare_models.py)
-│   ├── app.py                    # Servidor Flask del dashboard
-│   ├── dashboard.html            # Interfaz web del dashboard
-│   ├── Iniciar_Dashboard.bat     # Lanzador Windows — doble clic
-│   ├── generar_reportes.py       # Reportes para cliente
-│   ├── monitor_prophet.py        # Monitor de progreso Prophet
-│   └── debug_capture.py          # Depuración de ejecución
+├── dashboard/                   # Interfaz web
+│   ├── app.py                   # Servidor Flask (API JSON)
+│   └── dashboard.html           # Interfaz
 │
-├── models/legacy/                # Versiones históricas (v1.0, v2.0, ARIMA demo)
+├── scripts/                     # Scripts ejecutables
+│   ├── entrenar.py              # Entrena el modelo final y exporta la predicción
+│   ├── select_k.py              # Selección de k (codo + silueta) para K-means
+│   ├── tune_rf.py               # Ajuste de hiperparámetros del clasificador
+│   ├── evaluate_model.py        # Evaluación del clasificador y el regresor
+│   ├── compare_models.py        # Comparación RF vs XGBoost vs Prophet vs ARIMA
+│   └── eda.py                   # Reporte y figuras de análisis exploratorio
 │
-├── data/raw/                     # Datos fuente
-│   ├── Query_Result.csv          # Exportación v1
-│   ├── Query_Result_V2.csv       # Con columnas diarias
-│   ├── Query_Result_V3.csv       # Legacy
-│   ├── Query_Result_V4.csv       # Legacy
-│   ├── Query_Result_V5.csv       # Producción — usado por train_kmeans_rf_prod y el dashboard
-│   ├── ventas.csv
-│   └── README.md                 # Documentación de datasets
+├── sql/                         # Extracción desde Firebird
+│   ├── extraccion_ventas_v5.sql # Consulta vigente (genera Query_Result_V5.csv)
+│   ├── consultas_versiones_anteriores.sql
+│   └── exploracion/             # Scripts de exploración (credenciales por variables de entorno)
 │
-├── outputs/                      # Generado al ejecutar (gitignored)
-│   ├── figures/                  # Gráficos PNG
-│   ├── predictions/              # CSV de predicciones
-│   └── reports/                  # Resúmenes TXT y CSV (evaluación, tuning, comparación, EDA)
+├── data/
+│   ├── raw/                     # Query_Result_V5.csv (producción)
+│   └── historico/               # V1 a V4 y utilidades antiguas
 │
-├── docs/                         # Documentación del proyecto
-│   ├── BITACORA.md
-│   ├── CHANGELOG.md              # Historial detallado de decisiones y resultados
-│   ├── INDICE_DOCUMENTACION.md
-│   └── VERSION_SUMMARY.md
-│
-├── tests/                        # Pruebas (unittest)
-└── database/                     # Backups Firebird (gitignored)
+├── tests/                       # Pruebas (unittest)
+├── docs/                        # BITACORA.md (histórico) y CHANGELOG.md
+├── legacy/                      # Código heredado, fuera de producción
+└── outputs/                     # Generado al ejecutar (gitignored): figures/, predictions/, reports/, uploads/
 ```
 
 ---
 
-## Cómo usar
+## Cómo reentrenar con datos nuevos
 
-### 1. Preparar entorno
+1. Ejecutar `sql/extraccion_ventas_v5.sql` en un cliente Firebird y exportar a CSV (instrucciones en [sql/README.md](sql/README.md)).
+2. Guardar el resultado como `data/raw/Query_Result_V5.csv`, o subirlo desde la pestaña "Ejecutar modelo" del dashboard (se guarda en `outputs/uploads/`).
+3. Entrenar con `python scripts/entrenar.py` o con el botón de ejecución del dashboard.
+4. La predicción queda en `outputs/predictions/PREDICCION_MENSUAL.csv`.
 
-```bash
-cd modelo_aprendizaje_automatico
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-```
+---
 
-### 2. Ejecutar modelos
+## Cómo ejecutar los scripts
 
-Desde la **raíz del proyecto** (usar `PYTHONIOENCODING=utf-8` para evitar errores de consola con los caracteres ✓/✅/❌):
+Desde la **raíz del proyecto**:
 
 ```bash
-# Modelo FINAL — producción
-PYTHONIOENCODING=utf-8 python scripts/train_kmeans_rf_prod.py
-
-# Selección de k, ajuste de hiperparámetros, evaluación
-PYTHONIOENCODING=utf-8 python scripts/select_k.py
-PYTHONIOENCODING=utf-8 python scripts/tune_rf.py
-PYTHONIOENCODING=utf-8 python scripts/evaluate_model.py
-
-# Comparación de modelos (RF vs XGBoost vs Prophet vs ARIMA)
-PYTHONIOENCODING=utf-8 python scripts/compare_models.py
-
-# Análisis exploratorio de datos (EDA)
-PYTHONIOENCODING=utf-8 python scripts/eda.py
-
-# Dashboard (Flask + interfaz web)
-PYTHONIOENCODING=utf-8 python scripts/app.py    # o doble clic en scripts/Iniciar_Dashboard.bat
+PYTHONIOENCODING=utf-8 python scripts/entrenar.py        # Modelo final
+PYTHONIOENCODING=utf-8 python scripts/select_k.py        # Selección de k
+PYTHONIOENCODING=utf-8 python scripts/tune_rf.py         # Hiperparámetros
+PYTHONIOENCODING=utf-8 python scripts/evaluate_model.py  # Evaluación
+PYTHONIOENCODING=utf-8 python scripts/compare_models.py  # Comparación de modelos
+PYTHONIOENCODING=utf-8 python scripts/eda.py             # EDA
 ```
 
-`scripts/train_kmeans_rf.py` (predicción por ítem) es legacy y no forma parte del modelo final; `scripts/run_xgboost.py` y `scripts/run_prophet.py` quedan sustituidos por `scripts/compare_models.py`.
-
-### 3. Pruebas
+### Pruebas
 
 ```bash
-PYTHONIOENCODING=utf-8 python -m unittest tests.test_scaler_no_leakage tests.test_kmeans_selection tests.test_rf_tuning tests.test_regression_metrics tests.test_monthly_calendar tests.test_benchmarks tests.test_eda tests.test_bulk_adjustments
+PYTHONIOENCODING=utf-8 python -m unittest discover -s tests
 ```
 
-### 4. Salidas
+### Salidas
 
-Los resultados se guardan en `outputs/` (carpeta gitignored, se genera al ejecutar los scripts):
+Los resultados se guardan en `outputs/` (gitignored):
 
 - `outputs/predictions/` — CSV de predicciones (decisiones, probabilidades, ventas predichas)
 - `outputs/figures/` — gráficos PNG (selección de k, matriz de confusión, real vs. predicho, comparación de modelos, EDA)
-- `outputs/reports/` — resúmenes TXT/CSV (evaluación del modelo, tuning, comparación de modelos, EDA)
+- `outputs/reports/` — resúmenes TXT/CSV (evaluación, tuning, comparación, EDA)
+- `outputs/uploads/` — CSV subidos desde el dashboard
+
+---
+
+## Dashboard
+
+Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen general (KPIs, historial, distribución de decisiones, top de productos), catálogo de predicciones con búsqueda, filtros y descarga del CSV, detalle por producto y ejecución del modelo con subida de CSV y parámetros.
+
+```
+Navegador (dashboard/dashboard.html)
+        │  HTTP / JSON
+        ▼
+  dashboard/app.py (Flask, puerto 5000)
+        ├── GET  /api/status        Estado del pipeline + mes predicho
+        ├── POST /api/run           Lanza el modelo en un hilo secundario
+        ├── GET  /api/summary       KPIs, historial, métricas, top productos
+        ├── GET  /api/products      Lista paginada con filtros y orden
+        ├── GET  /api/product/<id>  Historial + predicción de un producto
+        └── GET  /api/download      Descarga PREDICCION_MENSUAL.csv
+              ▼
+  SalesForecastModel (src/ventas_forecast/model.py)
+```
+
+## Uso programático del modelo
+
+```python
+import sys
+sys.path.insert(0, "src")
+from ventas_forecast.model import SalesForecastModel
+from ventas_forecast.paths import DEFAULT_DATASET
+
+model = SalesForecastModel(filepath=DEFAULT_DATASET, min_months=6)
+model.run()                 # o paso a paso: load_and_clean, build_features, cluster, ...
+print(model.results.head())
+```
+
+Si no se indica `output_path`, la predicción se escribe en `outputs/predictions/PREDICCION_MENSUAL.csv`. Los parámetros del constructor (`n_clusters`, `lags`, `growth_threshold`, `clf_threshold`, `top_n_products`, `col_map`, ...) están documentados en el docstring de la clase.
 
 ---
 
 ## Datos
 
-| Archivo | Uso |
-|---------|-----|
-| `Query_Result_V5.csv` | **Producción** — `train_kmeans_rf_prod`, todos los scripts de evaluación/comparación y el dashboard |
-| `Query_Result_V3.csv`, `Query_Result_V4.csv` | Legacy |
-| `Query_Result.csv`, `Query_Result_V2.csv` | Legacy, fuente antes de limpieza |
+| Ubicación | Uso |
+|-----------|-----|
+| `data/raw/Query_Result_V5.csv` | **Producción**: el modelo, los scripts y el dashboard |
+| `data/historico/` | V1 a V4, solo referencia |
 
-Ver `data/raw/README.md` para el historial de versiones del dataset y `docs/CHANGELOG.md` para el detalle de la limpieza aplicada sobre `Query_Result_V5.csv` (completado de calendario mensual y exclusión de ajustes masivos de inventario).
+Ver [data/historico/README.md](data/historico/README.md) para el linaje V1 a V5 y [sql/README.md](sql/README.md) para la extracción. El detalle de la limpieza aplicada sobre V5 (completado de calendario mensual y exclusión de ajustes masivos de inventario) está en [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ---
 
 ## Documentación
 
-- [docs/BITACORA.md](docs/BITACORA.md) — Mejoras y cambios
-- [docs/CHANGELOG.md](docs/CHANGELOG.md) — Historial de versiones
-- [docs/INDICE_DOCUMENTACION.md](docs/INDICE_DOCUMENTACION.md) — Índice general
-
----
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — Historial de decisiones y resultados (incluye la tabla de rutas antiguas y nuevas de la reestructuración)
+- [docs/BITACORA.md](docs/BITACORA.md) — Bitácora histórica de desarrollo
+- [sql/README.md](sql/README.md) — Extracción de datos
 
 ## Dependencias
 

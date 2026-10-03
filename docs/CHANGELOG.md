@@ -1,5 +1,33 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Reestructuración] - 2026-10-03 (organización del repositorio)
+
+Reorganización sin cambios en la lógica del modelo: las métricas de `outputs/reports/evaluacion_modelo.txt` son idénticas antes y después. Las entradas siguientes de este historial (y `docs/BITACORA.md`) citan las rutas antiguas tal como eran en su fecha.
+
+| Antes | Ahora |
+|---|---|
+| `scripts/train_kmeans_rf_prod.py` | `src/ventas_forecast/model.py` (la ejecución directa pasó a `scripts/entrenar.py`) |
+| `scripts/app.py`, `scripts/dashboard.html` | `dashboard/app.py`, `dashboard/dashboard.html` |
+| `scripts/Iniciar_Dashboard.bat` | `Iniciar_Dashboard.bat` (raíz) |
+| `scripts/requirements_dashboard.txt` | unificado en `requirements.txt` |
+| `scripts/uploads/` (versionado) | `outputs/uploads/` (ignorado) |
+| `scripts/train_kmeans_rf.py`, `run_xgboost.py`, `run_prophet.py`, `monitor_prophet.py`, `generar_reportes.py`, `debug_capture.py` | `legacy/scripts/` |
+| `models/legacy/*` | `legacy/models/` |
+| `tests/test_xgboost_simple.py`, `tests/test_xgboost_import.py` | `legacy/tests/` |
+| `data/raw/Query_Result.csv`, `_V2`, `_V3`, `_V4`, `ventas.csv`, `cleaner.py` | `data/historico/` |
+| `scripts_db/query_v5.sql` (sin versionar) | `sql/extraccion_ventas_v5.sql` |
+| `scripts_db/consultas_sql*.txt` (sin versionar) | `sql/consultas_versiones_anteriores.sql` |
+| `scripts_db/explorar_bd*.py` (credenciales en el código) | `sql/exploracion/` (credenciales por variables de entorno) |
+| `docs/INDICE_DOCUMENTACION.md`, `docs/VERSION_SUMMARY.md` | eliminados (métricas y rutas desactualizadas) |
+| `scripts/README.md` | fusionado en `README.md` |
+
+Otros cambios:
+
+- `src/ventas_forecast/paths.py` agrega `DEFAULT_DATASET`, `DEFAULT_PREDICTION` y `UPLOADS`, y elimina constantes a carpetas inexistentes.
+- La salida por defecto del modelo es `outputs/predictions/PREDICCION_MENSUAL.csv`; antes se escribía junto al CSV de entrada (dejaba predicciones dentro de `data/raw/`).
+- Se dejan de versionar `.pyc` y las subidas del dashboard; `.gitignore` cubre archivos locales de herramientas y credenciales.
+- Nueva prueba `tests/test_paths.py` (rutas por defecto).
+
 ## [Corrección] - 2026-10-02 (total del dashboard y gráfico de distribución)
 
 ### Total de ventas predichas comparable y presentado como estimación conservadora (`/api/summary`, `dashboard.html`)
