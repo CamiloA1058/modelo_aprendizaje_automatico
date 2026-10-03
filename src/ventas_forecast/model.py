@@ -1,6 +1,6 @@
 """
-train_kmeans_rf_prod.py
-=======================
+model.py
+========
 Modelo de predicción de ventas reutilizable — KMeans + Random Forest.
 
 LÓGICA PRINCIPAL
@@ -12,7 +12,7 @@ cada producto. Solo se incluyen productos con suficientes datos históricos.
 
 Uso básico
 ----------
-    from train_kmeans_rf_prod import SalesForecastModel
+    from ventas_forecast.model import SalesForecastModel
 
     model = SalesForecastModel(filepath="mi_dataset.csv")
     model.run()
@@ -23,7 +23,6 @@ Columnas mínimas requeridas
     (ver col_map para nombres alternativos)
 """
 
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -42,9 +41,8 @@ from sklearn.metrics import (
     balanced_accuracy_score,
 )
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from ventas_forecast.data.cleaning import remove_bulk_adjustments  # noqa: E402
-from ventas_forecast.paths import DEFAULT_DATASET, DEFAULT_PREDICTION, ensure_output_dirs  # noqa: E402
+from ventas_forecast.data.cleaning import remove_bulk_adjustments
+from ventas_forecast.paths import DEFAULT_PREDICTION
 
 # ── Nombres de columna por defecto ────────────────────────────────────────────
 DEFAULT_COL_MAP = {
@@ -971,14 +969,3 @@ class SalesForecastModel:
         self.plot()
         return self.results
 
-
-# ── Punto de entrada ──────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    ensure_output_dirs()
-
-    model = SalesForecastModel(
-        filepath=DEFAULT_DATASET,
-        output_path=DEFAULT_PREDICTION,
-        min_months=6,
-    )
-    model.run()

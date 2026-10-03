@@ -13,8 +13,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from train_kmeans_rf_prod import SalesForecastModel  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from ventas_forecast.model import SalesForecastModel  # noqa: E402
 
 from tests._helpers import synthetic_history as _synthetic_history  # noqa: E402
 

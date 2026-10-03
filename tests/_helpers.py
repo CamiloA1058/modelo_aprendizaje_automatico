@@ -1,6 +1,6 @@
 """
 Utilidades compartidas entre los tests del pipeline de producción
-(train_kmeans_rf_prod.SalesForecastModel).
+(ventas_forecast.model.SalesForecastModel).
 """
 
 import numpy as np

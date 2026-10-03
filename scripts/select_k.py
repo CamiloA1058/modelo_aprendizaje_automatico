@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast.paths import DEFAULT_DATASET, FIGURES, REPORTS, ensure_output_dirs  # noqa: E402
 
-from train_kmeans_rf_prod import SalesForecastModel  # noqa: E402
+from ventas_forecast.model import SalesForecastModel  # noqa: E402
 
 
 def main():

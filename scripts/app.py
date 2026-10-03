@@ -26,8 +26,7 @@ DEFAULT_DATA   = DEFAULT_DATASET
 DEFAULT_OUTPUT = DEFAULT_PREDICTION
 
 # ── Importar modelo ───────────────────────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).parent))
-from train_kmeans_rf_prod import SalesForecastModel
+from ventas_forecast.model import SalesForecastModel
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 CORS(app)

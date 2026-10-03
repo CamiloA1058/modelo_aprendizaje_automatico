@@ -44,7 +44,7 @@ from ventas_forecast.eda import (  # noqa: E402
     seasonal_profile,
 )
 
-from train_kmeans_rf_prod import SalesForecastModel, DEFAULT_COL_MAP  # noqa: E402
+from ventas_forecast.model import SalesForecastModel, DEFAULT_COL_MAP  # noqa: E402
 
 # ── Paleta (misma referencia usada en el resto del proyecto) ────────────────
 COLOR_LINEA   = "#008300"   # Figura de ventas mensuales
@@ -181,7 +181,7 @@ def main():
         f"({monto_excluido:,.0f} COP, {monto_excluido / monto_total:.4%} del total)"
     )
     lineas.append(
-        "  -> Manejo real del pipeline (verificado en train_kmeans_rf_prod."
+        "  -> Manejo real del pipeline (verificado en ventas_forecast.model."
         "load_and_clean): groupby([id, description, fecha]) usa dropna=True "
         "por defecto, así que estas filas se EXCLUYEN silenciosamente del "
         "agregado — nunca llegan a self.df ni a clustering/entrenamiento/"

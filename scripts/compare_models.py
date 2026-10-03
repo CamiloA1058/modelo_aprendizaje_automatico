@@ -53,7 +53,7 @@ from ventas_forecast.benchmarks import (  # noqa: E402
     sample_products_with_test_rows,
 )
 
-from train_kmeans_rf_prod import SalesForecastModel  # noqa: E402
+from ventas_forecast.model import SalesForecastModel  # noqa: E402
 
 CLASS_NAMES = ["Reducir", "Mantener", "Reforzar"]
 N_SAMPLE_PRODUCTS = 150

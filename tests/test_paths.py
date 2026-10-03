@@ -5,10 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from ventas_forecast import paths  # noqa: E402
-from train_kmeans_rf_prod import SalesForecastModel  # noqa: E402
+from ventas_forecast.model import SalesForecastModel  # noqa: E402
 
 
 class TestDefaultPaths(unittest.TestCase):

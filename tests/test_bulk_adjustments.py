@@ -38,8 +38,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast.data.cleaning import remove_bulk_adjustments  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from train_kmeans_rf_prod import SalesForecastModel  # noqa: E402
+from ventas_forecast.model import SalesForecastModel  # noqa: E402
 
 
 def _synthetic_rows(n_products, fecha, ventas, precio, start_id=0):

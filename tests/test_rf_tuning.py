@@ -22,9 +22,9 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import balanced_accuracy_score, f1_score
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import train_kmeans_rf_prod as tk  # noqa: E402
-from train_kmeans_rf_prod import SalesForecastModel  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+import ventas_forecast.model as tk  # noqa: E402
+from ventas_forecast.model import SalesForecastModel  # noqa: E402
 
 from tests._helpers import synthetic_history  # noqa: E402
 
