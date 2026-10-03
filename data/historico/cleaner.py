@@ -8,7 +8,7 @@ SRC_PATH = PROJECT_ROOT / "src"
 sys.path.append(str(SRC_PATH))
 from ventas_forecast.data.cleaning import DatasetCleaner
 
-cleaner = DatasetCleaner("Query_Result_V4.csv", separator=';')
+cleaner = DatasetCleaner(str(Path(__file__).resolve().parent / "Query_Result_V4.csv"), separator=';')
 cleaner.load_data()
 
 # Limpieza original (mano de obra y gasolina)
@@ -25,4 +25,4 @@ cleaner.remove_price_anomalies(
     min_price=10
 )
 
-cleaner.save_dataset("Query_Result_V4_clean.csv")
+cleaner.save_dataset(str(Path(__file__).resolve().parent / "Query_Result_V4_clean.csv"))

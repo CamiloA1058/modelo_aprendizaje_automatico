@@ -1,31 +1,12 @@
---Query_result_V3---
+# Datos de entrada (producción)
 
-limpieza de el dataset v2 eliminando los registros cuya descripción contiene términos como 
-“MANTENIMIENTO” y “SOLUCION”, ya que corresponden a mano de obra y gasolina.
+Aquí vive únicamente el dataset que consume el modelo:
 
-Registros originales: 87,885
-Registros eliminados: 1,349
-Registros finales: 86,536
+- `Query_Result_V5.csv`: ventas diarias por producto (enero de 2024 a abril
+  de 2026), extraídas con [`sql/extraccion_ventas_v5.sql`](../../sql/extraccion_ventas_v5.sql).
 
---Query_result_V2---
-El archivo Query_Result_V2.csv contiene mas columnas
+Para regenerarlo o actualizarlo, ejecutar esa consulta en un cliente Firebird,
+exportar con las opciones descritas en [`sql/README.md`](../../sql/README.md) y
+reemplazar este archivo. Las versiones V1 a V4 están en `data/historico/`.
 
-FECHA
-DIA
-DIA_SEMANA
-VENTAS
-HUBO_PROMOCION
-TEMPORADA
-
-para agregar un nivel de detalle mucho mayor esta preparada para el análisis final sin limpiar datos extras.
-Estas columnas permiten:
-
-Analizar comportamiento por día
-Detectar patrones semanales
-Identificar temporadas
-Medir impacto de promociones
-Hacer predicciones más precisas
-
---Query_result---
-
-Es la primera prueba de la exportacion de los datos que hay en la base de datos
+Columnas: `CODIGO;DESCRIPCION;FECHA;ANIO;MES;DIA;DIA_SEMANA;VENTAS;TOTAL_VENDIDO;PRECIO_PROMEDIO;FRECUENCIA;HUBO_PROMOCION;TEMPORADA`.
