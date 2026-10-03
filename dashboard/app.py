@@ -312,6 +312,9 @@ def api_product(codigo):
 
     pred = pred_row.iloc[0].to_dict()
     pred = {k: (0 if (isinstance(v, float) and np.isnan(v)) else v) for k, v in pred.items()}
+    # El panel de detalle lee las ventas del último mes como `ventas_base`,
+    # igual que las tablas del resumen.
+    pred["ventas_base"] = pred.get(c("total_sold"), 0)
 
     return jsonify({
         "ok":          True,

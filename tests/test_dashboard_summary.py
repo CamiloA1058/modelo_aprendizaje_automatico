@@ -59,5 +59,45 @@ class SummaryHistoryComparableTest(unittest.TestCase):
         self.assertNotIn("factor_calibracion", data)
 
 
+
+class ProductDetailBaseSalesTest(unittest.TestCase):
+    """/api/product: the detail panel reads `ventas_base` (last month's sales)."""
+
+    def setUp(self):
+        model = SalesForecastModel(filepath="unused.csv")
+        c = model._c
+        months = pd.to_datetime(["2026-02-01", "2026-03-01"])
+        model.df = pd.DataFrame({
+            c("id"):          ["A", "A"],
+            c("description"): ["Producto A", "Producto A"],
+            "fecha":          months,
+            c("total_sold"):  [100.0, 200.0],
+            c("frequency"):   [1, 2],
+            c("avg_price"):   [10.0, 10.0],
+        })
+        results = pd.DataFrame({
+            c("id"):            ["A"],
+            c("description"):   ["Producto A"],
+            c("total_sold"):    [200.0],
+            "ventas_predichas": [150.0],
+            "decision":         ["Reducir stock"],
+            "prob_crecimiento": [0.2],
+            "prob_reduccion":   [0.6],
+            "cluster":          [0],
+        })
+        self._saved = dict(dashboard_app._state)
+        dashboard_app._state.update(model=model, results=results, mes_predicho="2026-04")
+        self.client = dashboard_app.app.test_client()
+
+    def tearDown(self):
+        dashboard_app._state.clear()
+        dashboard_app._state.update(self._saved)
+
+    def test_detail_includes_last_month_sales_as_ventas_base(self):
+        data = self.client.get("/api/product/A").get_json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["prediccion"]["ventas_base"], 200.0)
+
+
 if __name__ == "__main__":
     unittest.main()
