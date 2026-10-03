@@ -9,7 +9,7 @@ Reorganización sin cambios en la lógica del modelo: las métricas de `outputs/
 | `scripts/train_kmeans_rf_prod.py` | `src/ventas_forecast/model.py` (la ejecución directa pasó a `scripts/entrenar.py`) |
 | `scripts/app.py`, `scripts/dashboard.html` | `dashboard/app.py`, `dashboard/dashboard.html` |
 | `scripts/Iniciar_Dashboard.bat` | `Iniciar_Dashboard.bat` (raíz) |
-| `scripts/requirements_dashboard.txt` | unificado en `requirements.txt` |
+| `scripts/requirements_dashboard.txt` | `requirements.txt` (modelo y dashboard); XGBoost, Prophet y statsmodels en `requirements-comparacion.txt` para que el lanzador no instale dependencias pesadas |
 | `scripts/uploads/` (versionado) | `outputs/uploads/` (ignorado) |
 | `scripts/train_kmeans_rf.py`, `run_xgboost.py`, `run_prophet.py`, `monitor_prophet.py`, `generar_reportes.py`, `debug_capture.py` | `legacy/scripts/` |
 | `models/legacy/*` | `legacy/models/` |

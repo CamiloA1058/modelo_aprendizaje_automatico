@@ -49,6 +49,8 @@ Ver [docs/CHANGELOG.md](docs/CHANGELOG.md) para el historial completo de decisio
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+# Solo si se va a ejecutar scripts/compare_models.py:
+pip install -r requirements-comparacion.txt
 python dashboard/app.py          # dashboard en http://localhost:5000
 python scripts/entrenar.py       # entrena y escribe outputs/predictions/PREDICCION_MENSUAL.csv
 ```
@@ -62,7 +64,8 @@ Usar `PYTHONIOENCODING=utf-8` para evitar errores de consola con los caracteres 
 ```
 modelo_aprendizaje_automatico/
 ├── README.md
-├── requirements.txt             # Dependencias únicas (modelo, dashboard, benchmarks)
+├── requirements.txt             # Dependencias del modelo y el dashboard
+├── requirements-comparacion.txt # Extra para compare_models.py (XGBoost, Prophet, ARIMA)
 ├── Iniciar_Dashboard.bat        # Lanzador Windows, doble clic
 │
 ├── src/ventas_forecast/         # Código compartido
@@ -195,4 +198,4 @@ Ver [data/historico/README.md](data/historico/README.md) para el linaje V1 a V5 
 
 ## Dependencias
 
-Ver [requirements.txt](requirements.txt).
+Ver [requirements.txt](requirements.txt) y, para la comparación de modelos, [requirements-comparacion.txt](requirements-comparacion.txt).

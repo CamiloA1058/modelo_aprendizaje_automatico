@@ -1,0 +1,5 @@
+# Dependencias adicionales solo para scripts/compare_models.py (XGBoost, Prophet, ARIMA).
+-r requirements.txt
+xgboost>=2.0
+prophet>=1.1
+statsmodels>=0.14
