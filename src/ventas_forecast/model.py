@@ -97,7 +97,7 @@ class SalesForecastModel:
     output_path         : ruta del CSV de salida
     n_clusters          : clusters KMeans (default 3)
     lags                : lista de lags (default [1,2,3,6])
-    growth_threshold    : umbral crecimiento clase positiva (default 1.10)
+    growth_threshold    : umbral crecimiento para "Reforzar stock" (default 1.15)
     reduce_threshold    : umbral caída para decisión "Reducir stock" (default 0.90)
     clf_threshold       : umbral probabilidad clasificador (default 0.65)
     top_n_products      : top productos para regresor (default 200)
