@@ -1,7 +1,7 @@
 # Entorno virtual
 venv/
 .venv/
-__pycache__/
+**/__pycache__/
 *.py[cod]
 
 # Base de datos local
@@ -16,4 +16,20 @@ outputs/
 *.tmp
 
 # Marcador local del lanzador del dashboard (no versionar)
-scripts/.deps_ok
+.deps_ok
+
+# Subidas en tiempo de ejecucion del dashboard (viven en outputs/uploads)
+scripts/uploads/
+dashboard/uploads/
+
+# Herramientas locales de agentes y notas de trabajo
+.agents/
+.claude/
+.codegraph/
+CLAUDE.md
+skills-lock.json
+odd/
+
+# Credenciales y exploracion local de la base de datos
+sql/exploracion/.env
+scripts_db/
