@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from ventas_forecast.paths import DATA_RAW
+from ventas_forecast.paths import DATA_HISTORICO
 
 import pandas as pd
 import numpy as np
@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 #  CARGAR DATOS
 
-data = pd.read_csv(DATA_RAW / "ventas.csv")
+data = pd.read_csv(DATA_HISTORICO / "ventas.csv")
 
 data['fecha'] = pd.to_datetime(data['fecha'])
 data.set_index('fecha', inplace=True)

@@ -25,7 +25,7 @@ ARCHIVO HISTÓRICO: Véase BITACORA.md y CHANGELOG.md
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from ventas_forecast.paths import DATA_RAW, FIGURES, ensure_output_dirs
+from ventas_forecast.paths import DATA_HISTORICO, FIGURES, ensure_output_dirs
 
 import pandas as pd
 import numpy as np
@@ -48,7 +48,7 @@ print("="*70)
 print("PASO 1: CARGA Y LIMPIEZA DE DATOS")
 print("="*70)
 
-df = pd.read_csv(DATA_RAW / "Query_Result.csv", sep=';')
+df = pd.read_csv(DATA_HISTORICO / "Query_Result.csv", sep=';')
 
 def limpiar_numero(col):
     """Convierte columnas con formato europeo a números float"""

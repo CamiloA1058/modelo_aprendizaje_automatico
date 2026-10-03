@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from ventas_forecast.paths import DATA_RAW
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from ventas_forecast.paths import DATA_HISTORICO
 
 import pandas as pd
 import numpy as np
@@ -13,7 +13,7 @@ from xgboost import XGBRegressor
 
 print("Iniciando prueba XGBoost...")
 
-df = pd.read_csv(DATA_RAW / "Query_Result.csv", sep=';')
+df = pd.read_csv(DATA_HISTORICO / "Query_Result.csv", sep=';')
 
 def limpiar_numero(col):
     return col.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).astype(float)

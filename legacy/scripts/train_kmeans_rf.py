@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from ventas_forecast.paths import DATA_RAW, PREDICTIONS, ensure_output_dirs
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from ventas_forecast.paths import DATA_HISTORICO, PREDICTIONS, ensure_output_dirs
 
 import pandas as pd
 import numpy as np
@@ -17,7 +17,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 # 1. CARGA
 
-df = pd.read_csv(DATA_RAW / "Query_Result_V3.csv", sep=';')
+df = pd.read_csv(DATA_HISTORICO / "Query_Result_V3.csv", sep=';')
 
 def limpiar(col):
     return col.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).astype(float)

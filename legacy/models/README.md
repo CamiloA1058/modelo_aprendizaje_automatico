@@ -11,5 +11,5 @@ Versiones anteriores conservadas como referencia. No usar en producción.
 Ejecutar desde la raíz del proyecto:
 
 ```bash
-python models/legacy/model_k-means_random_forest_v2.0.py
+python legacy/models/model_k-means_random_forest_v2.0.py
 ```

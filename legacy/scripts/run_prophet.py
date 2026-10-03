@@ -2,8 +2,8 @@ import os
 import sys
 import logging
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from ventas_forecast.paths import DATA_RAW, PREDICTIONS, ensure_output_dirs
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from ventas_forecast.paths import DATA_HISTORICO, PREDICTIONS, ensure_output_dirs
 
 ensure_output_dirs()
 import pandas as pd
@@ -33,7 +33,7 @@ def limpiar_numero(col):
     )
 
 
-df = pd.read_csv(DATA_RAW / 'Query_Result.csv', sep=';')
+df = pd.read_csv(DATA_HISTORICO / 'Query_Result.csv', sep=';')
 
 df['VENTAS_MENSUALES'] = limpiar_numero(df['VENTAS_MENSUALES'])
 df['PRECIO_PROMEDIO'] = limpiar_numero(df['PRECIO_PROMEDIO'])
