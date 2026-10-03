@@ -238,7 +238,7 @@
         <div class="kpi amber">
           <div class="kpi-label">Ventas predichas</div>
           <div class="kpi-value" id="kpi-pred" style="font-size:20px">—</div>
-          <div class="kpi-sub" id="kpi-variacion">vs mes anterior</div>
+          <div class="kpi-sub" id="kpi-variacion">Estimación conservadora</div>
         </div>
       </div>
 
@@ -246,8 +246,8 @@
         <div class="card" style="grid-column:1/-1">
           <div class="section-title">Historial de ventas + predicción del próximo mes</div>
           <div class="legend-row">
-            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1A1916"></span>Ventas reales históricas</span>
-            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1D4ED8"></span>Predicción próximo mes</span>
+            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1A1916"></span>Ventas reales (productos con predicción de monto)</span>
+            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1D4ED8"></span>Predicción próximo mes (estimación conservadora)</span>
           </div>
           <div class="chart-wrap" style="height:240px">
             <canvas id="chart-hist" role="img" aria-label="Historial de ventas totales y predicción del próximo mes"></canvas>
@@ -259,7 +259,7 @@
         <div class="card">
           <div class="section-title">Distribución de decisiones</div>
           <div style="display:flex;align-items:center;gap:20px;height:180px;">
-            <div style="position:relative;width:150px;height:150px;flex-shrink:0;">
+            <div style="position:relative;width:150px;height:150px;flex-shrink:0;overflow:hidden;">
               <canvas id="chart-donut" role="img" aria-label="Distribución reforzar vs mantener"></canvas>
             </div>
             <div id="donut-legend" style="font-size:12px;display:flex;flex-direction:column;gap:10px;"></div>
@@ -577,9 +577,8 @@ async function loadSummary() {
   document.getElementById('kpi-reforzar-pct').textContent = pctRef + '% del total analizado';
   document.getElementById('kpi-mantener-pct').textContent = pctMan + '% del total analizado';
   document.getElementById('kpi-reducir-pct').textContent  = pctRed + '% del total analizado';
-  document.getElementById('kpi-variacion').innerHTML = d.variacion != null
-    ? `${deltaHtml(d.variacion)} vs mes anterior (top productos)`
-    : 'vs mes anterior';
+  document.getElementById('kpi-variacion').textContent =
+    `Estimación conservadora (${fmt(d.con_pred)} productos): el modelo tiende a subestimar el total`;
 
   renderHistChart(d.historial, d.pred_total, d.mes_predicho);
   renderDonut(d.reforzar, d.mantener, d.reducir);
@@ -650,7 +649,7 @@ function renderDonut(reforzar, mantener, reducir) {
       datasets: [{ data: [reforzar, mantener, reducir], backgroundColor: ['#0F6E56', '#D3D1C7', '#A32D2D'], borderWidth: 0, hoverOffset: 4 }]
     },
     options: {
-      responsive: false, cutout: '72%',
+      responsive: true, maintainAspectRatio: false, cutout: '72%',
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${fmt(ctx.raw)} (${Math.round(ctx.raw / total * 100)}%)` } } }
     }
   });

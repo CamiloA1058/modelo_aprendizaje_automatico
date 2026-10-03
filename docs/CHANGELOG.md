@@ -1,5 +1,28 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Corrección] - 2026-10-02 (total del dashboard y gráfico de distribución)
+
+### Total de ventas predichas comparable y presentado como estimación conservadora (`/api/summary`, `dashboard.html`)
+
+**Problema** (captura del dashboard): predicción de 268 M COP y "-52 %" frente al mes anterior. Dos causas: (1) la línea histórica sumaba TODOS los productos (685,7 M en marzo), mientras el total predicho solo cubre los 848 productos con predicción de monto (558,9 M reales en marzo); (2) el regresor aprende `log1p(target)`, así que la **suma** de sus predicciones subestima el total real (ratio 0,559 en prueba).
+
+**Cambios**: la línea histórica se calcula solo con los productos que tienen `ventas_predichas`, y `variacion` usa esos mismos productos. El KPI deja de mostrar el porcentaje de variación y presenta el total como "estimación conservadora".
+
+**Alternativas evaluadas y descartadas** (misma partición de prueba):
+
+| Enfoque | MAE por producto | MASE | Suma predicha / real |
+|---|---|---|---|
+| RF sobre log1p (actual) | 385.016 | 0,889 | 0,559 |
+| RF sobre pesos sin log | 551.371 | 1,273 | 1,415 |
+| Gradient boosting con pérdida Poisson | 519.741 | 1,200 | 1,156 |
+| RF log1p + factor de calibración del total (3,08) | 385.016 | 0,889 | 1,722 |
+
+El factor de calibración estimado en el entrenamiento sobrecorrige, y en validación por origen móvil varía entre 2,3 y 19,6, así que no es confiable. Los regresores sin sesgo en el total empeoran el error por producto (MASE > 1). Se mantiene el regresor actual; un pronóstico del total mensual del taller queda como trabajo futuro.
+
+### Gráfico de distribución de decisiones desbordado
+
+El doughnut usaba `responsive: false`, así que el canvas tomaba su tamaño por defecto (300 × 150 px) y se salía del contenedor de 150 × 150 px. Ahora usa `responsive: true` y `maintainAspectRatio: false` y se ajusta al contenedor.
+
 ## [Limpieza] - 2026-09-23
 
 ### Ajustes masivos de inventario CONFIRMADOS y excluidos (`remove_bulk_adjustments`, `src/ventas_forecast/data/cleaning.py`)

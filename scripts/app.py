@@ -168,14 +168,20 @@ def api_summary():
     base_total = float(df[c("total_sold")].sum())
     pred_col   = "ventas_predichas"
     df_con_pred = df[df[pred_col].notna()]
-    pred_total  = float(df_con_pred[pred_col].sum()) if len(df_con_pred) else 0
-    variacion   = ((pred_total - df_con_pred[c("total_sold")].sum()) /
-                   df_con_pred[c("total_sold")].sum() * 100) if len(df_con_pred) and df_con_pred[c("total_sold")].sum() > 0 else 0
+    # Suma de predicciones por producto: estimación conservadora del total
+    # (el regresor en log1p tiende a subestimar los agregados).
+    pred_total     = float(df_con_pred[pred_col].sum()) if len(df_con_pred) else 0.0
+    base_con_pred  = float(df_con_pred[c("total_sold")].sum()) if len(df_con_pred) else 0.0
+    variacion      = ((pred_total - base_con_pred) / base_con_pred * 100
+                      if base_con_pred > 0 else 0)
 
-    # Historial mensual del modelo (para el gráfico de tendencia)
-    hist = model.df.groupby("fecha").agg(
-        ventas_reales=(c("total_sold"), "sum")
-    ).reset_index().sort_values("fecha")
+    # Historial mensual SOLO de los productos con predicción de monto, para
+    # que la línea y el punto predicho sean comparables.
+    hist = (
+        model.df[model.df[c("id")].isin(df_con_pred[c("id")])]
+        .groupby("fecha").agg(ventas_reales=(c("total_sold"), "sum"))
+        .reset_index().sort_values("fecha")
+    )
     hist["fecha"] = hist["fecha"].astype(str)
     hist_list = hist.tail(18).to_dict(orient="records")
 
