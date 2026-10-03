@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from ventas_forecast.paths import DATA_RAW, REPORTS, ensure_output_dirs  # noqa: E402
+from ventas_forecast.paths import DEFAULT_DATASET, REPORTS, ensure_output_dirs  # noqa: E402
 
 from train_kmeans_rf_prod import SalesForecastModel  # noqa: E402
 
@@ -28,7 +28,7 @@ def main():
     inicio = time.time()
     ensure_output_dirs()
 
-    model = SalesForecastModel(filepath=DATA_RAW / "Query_Result_V5.csv")
+    model = SalesForecastModel(filepath=DEFAULT_DATASET)
     model.load_and_clean()
     model.build_features()
     model.cluster()

@@ -18,15 +18,12 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 # ── Rutas del proyecto ────────────────────────────────────────────────────────
-try:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-    from ventas_forecast.paths import DATA_RAW, PREDICTIONS, ensure_output_dirs
-    ensure_output_dirs()
-    DEFAULT_DATA   = DATA_RAW    / "Query_Result_V5.csv"
-    DEFAULT_OUTPUT = PREDICTIONS / "PREDICCION_MENSUAL.csv"
-except ImportError:
-    DEFAULT_DATA   = Path(__file__).parent / "Query_Result_V5.csv"
-    DEFAULT_OUTPUT = Path(__file__).parent / "PREDICCION_MENSUAL.csv"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from ventas_forecast.paths import DEFAULT_DATASET, DEFAULT_PREDICTION, ensure_output_dirs  # noqa: E402
+
+ensure_output_dirs()
+DEFAULT_DATA   = DEFAULT_DATASET
+DEFAULT_OUTPUT = DEFAULT_PREDICTION
 
 # ── Importar modelo ───────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))

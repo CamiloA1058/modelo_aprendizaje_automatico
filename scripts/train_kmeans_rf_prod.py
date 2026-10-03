@@ -44,6 +44,7 @@ from sklearn.metrics import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast.data.cleaning import remove_bulk_adjustments  # noqa: E402
+from ventas_forecast.paths import DEFAULT_DATASET, DEFAULT_PREDICTION, ensure_output_dirs  # noqa: E402
 
 # ── Nombres de columna por defecto ────────────────────────────────────────────
 DEFAULT_COL_MAP = {
@@ -145,7 +146,7 @@ class SalesForecastModel:
         self.col_map         = {**DEFAULT_COL_MAP, **(col_map or {})}
         self.output_path     = (
             Path(output_path) if output_path
-            else self.filepath.parent / "PREDICCION_MENSUAL.csv"
+            else DEFAULT_PREDICTION
         )
         self.n_clusters      = n_clusters
         self.lags            = lags or [1, 2, 3, 6]
@@ -973,19 +974,11 @@ class SalesForecastModel:
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    try:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-        from ventas_forecast.paths import DATA_RAW, PREDICTIONS, ensure_output_dirs
-        ensure_output_dirs()
-        data_file   = DATA_RAW    / "Query_Result_V5.csv"
-        output_file = PREDICTIONS / "PREDICCION_MENSUAL.csv"
-    except ImportError:
-        data_file   = Path(__file__).parent / "Query_Result_V5.csv"
-        output_file = Path(__file__).parent / "PREDICCION_MENSUAL.csv"
+    ensure_output_dirs()
 
     model = SalesForecastModel(
-        filepath=data_file,
-        output_path=output_file,
+        filepath=DEFAULT_DATASET,
+        output_path=DEFAULT_PREDICTION,
         min_months=6,
     )
     model.run()
