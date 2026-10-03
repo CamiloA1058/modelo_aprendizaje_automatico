@@ -15,7 +15,7 @@ cd /d "%~dp0"
 
 :: -- Elegir Python: entorno virtual del proyecto si existe ---------------
 set "PY=python"
-if exist "%~dp0..\.venv\Scripts\python.exe" set "PY=%~dp0..\.venv\Scripts\python.exe"
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
 
 "%PY%" --version >nul 2>&1
 if errorlevel 1 (
@@ -32,12 +32,12 @@ if errorlevel 1 (
 if errorlevel 1 (
     echo  Instalando dependencias, esto puede tardar unos minutos...
     echo.
-    "%PY%" -m pip install -r requirements_dashboard.txt
+    "%PY%" -m pip install -r requirements.txt
     if errorlevel 1 (
         echo.
         echo  [ERROR] No se pudieron instalar las dependencias.
         echo  Intenta ejecutar manualmente:
-        echo  "%PY%" -m pip install -r requirements_dashboard.txt
+        echo  "%PY%" -m pip install -r requirements.txt
         pause
         exit /b 1
     )
@@ -54,6 +54,6 @@ start "" /b cmd /c "timeout /t 3 >nul && start http://localhost:5000"
 echo  El dashboard se abrira automaticamente en tu navegador.
 echo  Para cerrar el programa cierra esta ventana.
 echo.
-"%PY%" app.py
+"%PY%" dashboard\app.py
 
 pause

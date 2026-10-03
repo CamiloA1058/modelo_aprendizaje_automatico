@@ -19,7 +19,7 @@ from flask_cors import CORS
 
 # ── Rutas del proyecto ────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from ventas_forecast.paths import DEFAULT_DATASET, DEFAULT_PREDICTION, ensure_output_dirs  # noqa: E402
+from ventas_forecast.paths import DEFAULT_DATASET, DEFAULT_PREDICTION, UPLOADS, ensure_output_dirs  # noqa: E402
 
 ensure_output_dirs()
 DEFAULT_DATA   = DEFAULT_DATASET
@@ -28,7 +28,7 @@ DEFAULT_OUTPUT = DEFAULT_PREDICTION
 # ── Importar modelo ───────────────────────────────────────────────────────────
 from ventas_forecast.model import SalesForecastModel
 
-app = Flask(__name__, static_folder="static", static_url_path="/static")
+app = Flask(__name__)
 CORS(app)
 
 _state = {
@@ -127,8 +127,8 @@ def api_run():
 
     if "file" in request.files:
         f = request.files["file"]
-        upload_dir = Path(__file__).parent / "uploads"
-        upload_dir.mkdir(exist_ok=True)
+        upload_dir = UPLOADS
+        upload_dir.mkdir(parents=True, exist_ok=True)
         filepath = upload_dir / f.filename
         f.save(filepath)
     else:

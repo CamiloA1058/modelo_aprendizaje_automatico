@@ -11,7 +11,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "dashboard"))
 import app as dashboard_app  # noqa: E402
 from ventas_forecast.model import SalesForecastModel  # noqa: E402
 
