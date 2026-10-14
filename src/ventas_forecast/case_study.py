@@ -101,6 +101,14 @@ def monthly_sales(source, month):
     return df.groupby("CODIGO")["TOTAL_VENDIDO"].sum()
 
 
+def monthly_units(source, month):
+    """Unidades vendidas (VENTAS) por codigo de producto en el mes 'AAAA-MM'."""
+    df = _read(source)
+    df = df[_month_key(df["FECHA"]) == month]
+    df = df.assign(VENTAS=_parse_es(df["VENTAS"]))
+    return df.groupby("CODIGO")["VENTAS"].sum()
+
+
 def months_in(source):
     df = _read(source)
     return sorted(_month_key(df["FECHA"]).unique())

@@ -138,5 +138,66 @@ class UnidadesTest(unittest.TestCase):
         self.assertEqual(float(ss.unidades([3 * 1.1], [1.1])[0]), 3.0)
 
 
+class CoberturaTest(unittest.TestCase):
+    def setUp(self):
+        # real, stock: cubre, cubre (real 0), no cubre, agotado (stock 0, vendio)
+        self.real = np.array([10.0, 0.0, 50.0, 5.0])
+        self.stock = np.array([10.0, 0.0, 40.0, 0.0])
+
+    def test_cobertura_incluye_los_que_no_vendieron(self):
+        m = ss.cobertura(self.real, self.stock)
+        self.assertEqual(m["n"], 4)
+        self.assertAlmostEqual(m["cobertura"], 0.5)
+
+    def test_cobertura_entre_los_que_vendieron(self):
+        m = ss.cobertura(self.real, self.stock)
+        self.assertEqual(m["n_vendieron"], 3)
+        self.assertAlmostEqual(m["cobertura_vendieron"], 1 / 3)
+
+    def test_razones_stock_real(self):
+        m = ss.cobertura(self.real, self.stock)
+        # solo los que vendieron: 10/10, 40/50, 0/5
+        self.assertAlmostEqual(m["mediana_stock_real"], 0.8)
+        self.assertAlmostEqual(m["media_stock_real"], (1.0 + 0.8 + 0.0) / 3)
+        self.assertAlmostEqual(m["total_stock_real"], 50.0 / 65.0)
+
+    def test_agotados(self):
+        m = ss.cobertura(self.real, self.stock)
+        self.assertAlmostEqual(m["agotados"], 0.25)
+
+    def test_unidades(self):
+        m = ss.cobertura(self.real, self.stock,
+                         real_unid=[2.0, 0.0, np.nan, 1.0],
+                         stock_unid=[2.0, 0.0, 3.0, 0.0])
+        self.assertEqual(m["n_unid"], 3)
+        self.assertAlmostEqual(m["cobertura_unid"], 2 / 3)
+
+    def test_sin_filas(self):
+        m = ss.cobertura([], [])
+        self.assertEqual(m["n"], 0)
+        self.assertTrue(np.isnan(m["cobertura"]))
+
+    def test_filas_sin_stock_se_excluyen(self):
+        m = ss.cobertura([1.0, 2.0], [np.nan, 5.0])
+        self.assertEqual(m["n"], 1)
+        self.assertAlmostEqual(m["cobertura"], 1.0)
+
+
+class UnidadesRealesTest(unittest.TestCase):
+    def test_suma_de_unidades_por_producto_y_mes(self):
+        import io
+        from ventas_forecast import case_study as cs
+        csv = (
+            "CODIGO;DESCRIPCION;FECHA;ANIO;MES;DIA;DIA_SEMANA;VENTAS;TOTAL_VENDIDO;PRECIO_PROMEDIO;FRECUENCIA;HUBO_PROMOCION;TEMPORADA\n"
+            "1;A;01/04/2026;2026;4;1;3;30,00;54.000,00;1.800,00;2;0;Baja\n"
+            "1;A;02/04/2026;2026;4;2;4;2,50;5.000,00;2.000,00;1;0;Baja\n"
+            "1;A;03/05/2026;2026;5;3;1;9,00;9.000,00;1.000,00;1;0;Baja\n"
+            "2;B;05/04/2026;2026;4;5;6;4,00;8.000,00;2.000,00;1;0;Baja\n")
+        u = cs.monthly_units(io.StringIO(csv), "2026-04")
+        self.assertAlmostEqual(u["1"], 32.5)
+        self.assertAlmostEqual(u["2"], 4.0)
+        self.assertEqual(len(u), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

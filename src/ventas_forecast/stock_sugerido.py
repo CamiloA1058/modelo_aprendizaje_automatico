@@ -116,3 +116,45 @@ def unidades(stock, precio):
     # el redondeo evita que 3,0000000000000004 suba una unidad
     out[...] = np.where(ok, np.ceil(np.round(cociente, 9)), np.nan)
     return out
+
+
+def cobertura(real, stock, real_unid=None, stock_unid=None):
+    """Metricas de cobertura del stock sugerido frente a lo realmente vendido.
+
+    Solo cuentan las filas con stock y real conocidos. cobertura = fraccion
+    con real <= stock (incluye los que no vendieron); cobertura_vendieron =
+    la misma entre los que vendieron (real > 0); mediana/media_stock_real =
+    stock / real entre los que vendieron; total_stock_real = suma del stock /
+    suma de lo real (indicador de sobrestock); agotados = fraccion de todos
+    los productos con stock 0 que si vendieron. Con unidades, cobertura_unid =
+    real_unid <= stock_unid entre las filas con ambas conocidas."""
+    real = np.asarray(real, float)
+    stock = np.asarray(stock, float)
+    ok = ~np.isnan(real) & ~np.isnan(stock)
+    r, s = real[ok], stock[ok]
+    cubre = r <= s + 1e-6
+    vendio = r > 0
+    n = int(len(r))
+    nan = float("nan")
+    out = {
+        "n": n,
+        "cobertura": float(cubre.mean()) if n else nan,
+        "n_vendieron": int(vendio.sum()),
+        "cobertura_vendieron": float(cubre[vendio].mean()) if vendio.any() else nan,
+        "mediana_stock_real": nan, "media_stock_real": nan,
+        "total_stock_real": float(s.sum() / r.sum()) if n and r.sum() > 0 else nan,
+        "agotados": float(((s <= 0) & vendio).mean()) if n else nan,
+        "n_unid": 0, "cobertura_unid": nan,
+    }
+    if vendio.any():
+        razon = s[vendio] / r[vendio]
+        out["mediana_stock_real"] = float(np.median(razon))
+        out["media_stock_real"] = float(razon.mean())
+    if real_unid is not None and stock_unid is not None:
+        ru = np.asarray(real_unid, float)
+        su = np.asarray(stock_unid, float)
+        oku = ~np.isnan(ru) & ~np.isnan(su)
+        out["n_unid"] = int(oku.sum())
+        if oku.any():
+            out["cobertura_unid"] = float((ru[oku] <= su[oku] + 1e-6).mean())
+    return out

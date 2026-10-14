@@ -1,3 +1,20 @@
+## [Experimento] Stock sugerido con nivel de servicio 70 % - 2026-10-14
+
+Objetivo del usuario: predicciones mensuales por producto confiables "alrededor del 70 %" para decidir compras. El monto puntual por producto no llega (mejor acierto medio 38 %, ver "[Experimento] Acierto del monto por producto"), así que se mide otra cosa, la que usa la teoría de inventarios: un nivel "order-up-to" X al nivel de servicio 70 % ("si abastece hasta X, la demanda del mes queda cubierta en 7 de cada 10 casos").
+
+**Método (sin usar holdout).** cota = max(expm1(log1p(pred) + q70(r)), 0), con r = log1p(real) - log1p(pred) medido en la validación interna del entrenamiento de cada origen (partición temporal de prueba del regresor para los productos del modelo y la del clasificador de venta para los de estimación por promedio, con su media de 3 meses como predicción). Los residuos se segmentan por cubetas de `prob_venta` ([0-0,4), [0,4-0,6), [0,6-0,8), [0,8-1]; las contiguas con menos de 50 filas se fusionan; filas sin probabilidad solo cuentan en el cuantil global). También se guardan los cuantiles de 0,5 y 0,9. Unidades = techo(stock / último precio promedio conocido).
+
+**Evaluación.** Origen rodante 2026-04..2026-09 (entrenamiento estrictamente anterior a cada mes, calibración solo con la validación interna de ese entrenamiento), universo del dashboard (6.145 producto-mes), `scripts/experimento_stock_sugerido.py` (232 s; cache `odd/stock_cache`), informe `outputs/reports/experimento_stock_sugerido.txt/.csv` y figura `experimento_stock_sugerido.png`.
+
+- Cobertura (real <= stock sugerido, todos los productos): 63,1 / 65,4 / 74,9 / 69,1 / 64,3 / 73,1 % por mes; agrupado 68,4 % (desviación -1,6 pp respecto de 70 %); 4 de 6 meses dentro de 65-75 %. En unidades: 67,3 / 68,0 / 77,8 / 71,5 / 67,0 / 75,2 %, agrupado 71,2 %.
+- Entre los productos que sí vendieron la cobertura es mucho menor: 47,3 % agrupado (42,1 a 56,7 % por mes). El 70 % incluye a los que no vendieron, para los que el sistema sugiere stock cercano a cero (cubeta de baja probabilidad de venta).
+- Sobrestock: stock total / ventas reales totales 1,28 veces agrupado (1,03 a 1,99; junio, con ventas reales bajas, 1,99); mediana por producto entre los que vendieron 0,91 veces, media 2,15. Agotados (stock 0 y sí vendió): 0,2 %.
+- Segmentos (agrupado): modelo 68,3 %, promedio 68,5 % (entre los que vendieron 52,5 % y 31,8 %); top 100 por predicción 86,0 %; resto 68,1 %; por probabilidad de venta [0-0,4) 80,5 %, [0,4-0,6) 67,7 %, [0,6-0,8) 68,4 %, [0,8-1] 67,0 %. Otros niveles de servicio (agrupado): 50 % -> 53,6 %, 90 % -> 88,4 %.
+- Decisión: cobertura agrupada dentro de la franja 65-75 % y mayoría de meses dentro -> se integra (ver "[Sistema] Stock sugerido por producto"). El universo del dashboard ya es el top 1.900 por construcción, por eso no se reporta "top 1.900 vs resto".
+- Limitación: es una cobertura de "al menos lo vendido" (puede haber sobrestock), no un acierto del monto; septiembre está incompleto (real hasta el 22).
+
+---
+
 ## [Sistema] Vista por grupo de producto - 2026-10-14
 
 Decisión del orquestador, dentro del objetivo del usuario de mejorar las decisiones de compra: el taller compra por línea o proveedor y el experimento "[Experimento] Predicción mensual por grupo" mostró que simplemente sumar las predicciones por producto que ya da el sistema (variante G0) acierta el 67,6 % del valor vendido por grupo (acierto ponderado agrupado, abril a septiembre de 2026), 4 de 6 meses con 70 % o más (72,1 / 64,5 / 46,6 / 74,0 / 70,6 / 72,8 %) y 73,4 % en los 20 grupos con más ventas. Ninguna variante resultó demostrablemente mejor, por eso el modelo no cambia y solo se muestra esta vista. No es una promesa de 70 %: el agrupado queda en 67,6 % y junio (las ventas reales cayeron de 492 M a 263 M) lo hunde.
