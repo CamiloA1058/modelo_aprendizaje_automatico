@@ -54,6 +54,9 @@ from ventas_forecast.benchmarks import (  # noqa: E402
 )
 
 from ventas_forecast.model import SalesForecastModel  # noqa: E402
+from ventas_forecast.figuras import (  # noqa: E402
+    ANCHO, FUENTE, aplicar_estilo, estilo_ejes, fmt_es, formateador_es,
+)
 
 CLASS_NAMES = ["Reducir", "Mantener", "Reforzar"]
 N_SAMPLE_PRODUCTS = 150
@@ -391,46 +394,64 @@ def build_csv_rows(res_clf, res_reg_a, res_reg_b):
 
 
 def build_figure(res_clf, res_reg_b, salida):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5.5))
+    """Clasificación (F1 macro y exactitud balanceada) y regresión (MASE), apiladas."""
+    aplicar_estilo()
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(ANCHO, 8.6),
+                                   gridspec_kw={"height_ratios": [1, 1.15]})
+    estilo_ejes(ax1)
+    estilo_ejes(ax2, grid="x")
 
-    # ── Panel izquierdo: F1 macro y accuracy balanceada por modelo ─────────
+    # ── Panel superior: F1 macro y exactitud balanceada por modelo ─────────
     modelos_clf = list(res_clf.keys())
     x = np.arange(len(modelos_clf))
-    ancho = 0.35
-    color_f1 = "#1baf7a"   # paleta categórica de referencia, posición 3
-    color_bal = "#4a3aa7"  # posición 7
-
+    ancho = 0.36
     f1_macro = [res_clf[m]["f1_macro"] for m in modelos_clf]
     bal_acc = [res_clf[m]["balanced_accuracy"] for m in modelos_clf]
 
-    ax1.bar(x - ancho / 2, f1_macro, width=ancho, color=color_f1, label="F1 macro")
-    ax1.bar(x + ancho / 2, bal_acc, width=ancho, color=color_bal, label="Accuracy balanceada")
+    b1 = ax1.bar(x - ancho / 2, f1_macro, width=ancho, color="#1baf7a", label="F1 macro")
+    b2 = ax1.bar(x + ancho / 2, bal_acc, width=ancho, color="#4a3aa7",
+                 label="Exactitud balanceada")
+    for barras in (b1, b2):
+        for barra in barras:
+            ax1.annotate(fmt_es(barra.get_height(), 2),
+                         (barra.get_x() + barra.get_width() / 2, barra.get_height()),
+                         textcoords="offset points", xytext=(0, 3), ha="center",
+                         fontsize=FUENTE - 1)
     ax1.set_xticks(x)
-    ax1.set_xticklabels(modelos_clf, rotation=15)
+    ax1.set_xticklabels(modelos_clf)
     ax1.set_ylabel("Valor de la métrica")
-    ax1.set_title("Clasificador — F1 macro y accuracy balanceada")
-    ax1.set_ylim(0, 1)
-    ax1.legend()
-    ax1.grid(True, axis="y", alpha=.3)
+    ax1.set_ylim(0, 0.8)
+    ax1.yaxis.set_major_formatter(formateador_es(1))
+    ax1.legend(frameon=False, loc="upper right")
 
-    # ── Panel derecho: MASE por modelo (Regresión B), ordenado ─────────────
-    modelos_mase = sorted(res_reg_b.keys(), key=lambda m: res_reg_b[m]["mase"])
+    # ── Panel inferior: MASE por modelo (menor es mejor), ordenado ─────────
+    modelos_mase = sorted(res_reg_b.keys(), key=lambda m: res_reg_b[m]["mase"], reverse=True)
     valores_mase = [res_reg_b[m]["mase"] for m in modelos_mase]
-
-    ax2.barh(modelos_mase, valores_mase, color="#eb6834")
-    # Línea de referencia en tinta neutra (el rojo queda reservado para
-    # estados); su etiqueta va arriba del panel para no chocar con el eje X.
-    ax2.axvline(1.0, color="#52514e", linestyle="--", linewidth=1.2)
-    ax2.set_ylim(-0.6, len(modelos_mase) - 0.1)
-    ax2.text(1.0, len(modelos_mase) - 0.2, " MASE = 1: pronóstico ingenuo\n (entrenamiento)",
-             color="#52514e", ha="left", va="top", fontsize=8.5)
-    ax2.set_xlabel("MASE (muestra de productos)")
-    ax2.set_title("Regresión — MASE por modelo (menor es mejor)")
-    ax2.grid(True, axis="x", alpha=.3)
+    etiquetas = [m.replace("Media_3", "Media de 3 meses") for m in modelos_mase]
+    ax2.barh(etiquetas, valores_mase, color="#eb6834", zorder=2)
+    for i, v in enumerate(valores_mase):
+        ax2.annotate(fmt_es(v, 2), (v, i), textcoords="offset points", xytext=(-5, 0),
+                     ha="right", va="center", color="white", fontweight="bold")
+    ax2.axvline(1.0, color="#52514e", linestyle="--", linewidth=1.2, zorder=1,
+                label="MASE = 1: igual que el pronóstico ingenuo")
+    ax2.set_xlim(0, max(valores_mase) * 1.15)
+    ax2.xaxis.set_major_formatter(formateador_es(1))
+    ax2.set_xlabel("Error escalado (MASE): menor es mejor")
+    ax2.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.4, -0.2))
 
     fig.tight_layout()
     fig.savefig(salida, dpi=200)
     plt.close(fig)
+
+
+def figura_desde_csv(csv=None, salida=None):
+    """Regenera la figura desde comparacion_modelos.csv sin volver a entrenar."""
+    tabla = pd.read_csv(csv or REPORTS / "comparacion_modelos.csv")
+    res_clf = {m: g.set_index("metrica")["valor"].to_dict()
+               for m, g in tabla[tabla["seccion"] == "clasificacion"].groupby("modelo", sort=False)}
+    res_reg = {m: g.set_index("metrica")["valor"].to_dict()
+               for m, g in tabla[tabla["seccion"] == "regresion_b_muestra"].groupby("modelo", sort=False)}
+    build_figure(res_clf, res_reg, salida or FIGURES / "comparacion_modelos.png")
 
 
 def main():
