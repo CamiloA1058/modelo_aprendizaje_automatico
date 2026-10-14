@@ -43,6 +43,7 @@ from sklearn.metrics import (
 
 from ventas_forecast import eligibility as el
 from ventas_forecast import improvements as im
+from ventas_forecast import sale_probability as sp
 from ventas_forecast.data.cleaning import remove_bulk_adjustments
 from ventas_forecast.paths import DEFAULT_PREDICTION
 
@@ -136,6 +137,17 @@ class SalesForecastModel:
                           es "Sin recomendación (estimación por promedio)".
                           No cambia el entrenamiento. Con False la salida es
                           la de antes del paso.
+    probabilidad_venta  : True por defecto (produccion). Tras
+                          estimar_por_promedio(), agregar_probabilidad_venta()
+                          entrena un RandomForest binario "habra ventas el mes
+                          siguiente" (class_weight balanced) solo con la
+                          particion de entrenamiento, elige el umbral con la
+                          validacion interna y escribe prob_venta (0-1) y
+                          se_vendera ("Sí"/"No") para todos los productos de
+                          los resultados. No cambia el clasificador de 3
+                          clases, el regresor, la mezcla ni la estimacion por
+                          promedio. Con False la salida es la de antes del
+                          paso.
     """
 
     def __init__(
@@ -158,6 +170,7 @@ class SalesForecastModel:
         bulk_adjustment_min_products=100,
         elegibilidad_ampliada=False,
         estimacion_por_promedio=True,
+        probabilidad_venta=True,
     ):
         self.filepath        = Path(filepath)
         self.sep             = sep
@@ -180,10 +193,17 @@ class SalesForecastModel:
         self.bulk_adjustment_min_products = bulk_adjustment_min_products
         self.elegibilidad_ampliada = elegibilidad_ampliada
         self.estimacion_por_promedio = estimacion_por_promedio
+        self.probabilidad_venta = probabilidad_venta
         # Opcional (solo experimentos): funcion que recibe los meses actuales
         # (fecha) de las filas de entrenamiento y devuelve sus pesos de
         # muestra. None = sin pesos (comportamiento de produccion).
         self.sample_weight_fn = None
+        # Poblados por agregar_probabilidad_venta()
+        self.sale_clf = None
+        self.sale_threshold = None
+        self.sale_val_accuracy = None
+        self._sale_n_train = None
+        self._sale_n_val = None
 
         # Estado interno
         self.df           = None   # historial completo
@@ -1063,6 +1083,75 @@ class SalesForecastModel:
         print(f"[✓] Estimación por promedio: {len(nuevos):,} productos sin "
               f"ventas el último mes (monto = media de 3 meses, sin decisión)")
 
+    # ── 7c. PROBABILIDAD DE VENTA (habra ventas el mes siguiente: si/no) ─────
+    def agregar_probabilidad_venta(self):
+        """
+        Entrena un RandomForest binario (vende = ventas del mes siguiente > 0,
+        class_weight balanced, misma configuracion del experimento "[Experimento]
+        Probabilidad de venta") con las variables de SalesForecastModel mas las
+        de ventas_forecast.sale_probability, SOLO con la particion temporal de
+        entrenamiento. El umbral maximiza la exactitud en la validacion interna
+        (nunca en el mes a predecir). Escribe en self.results prob_venta (0-1) y
+        se_vendera ("Sí"/"No") para todos los productos (modelo y promedio) y
+        vuelve a exportar el CSV. Guarda sale_threshold y sale_val_accuracy.
+        No toca el clasificador de 3 clases, el regresor ni la mezcla. Con
+        probabilidad_venta=False no hace nada.
+        """
+        if not self.probabilidad_venta:
+            return
+        c = self._c
+        d = sp.add_probability_features(
+            self.df, c("id"), c("total_sold"), c("frequency"))
+        frame, tr, te = sp.sale_train_frame(
+            d, c("id"), c("total_sold"), self.train_ratio)
+        feats = [
+            "VENTAS_LOG", "TOTAL_LOG", "PRECIO_LOG", c("frequency"),
+            *[f"lag_{l}" for l in self.lags], "mean_3", "mean_6",
+            "mes_sig_sin", "mes_sig_cos", "cluster", *sp.NEW_FEATURES,
+        ]
+        X = frame[feats].fillna(0)
+        y = frame["vende"].to_numpy()
+        clf = RandomForestClassifier(
+            n_estimators=300, max_depth=12, min_samples_leaf=5,
+            class_weight="balanced", random_state=42, n_jobs=-1)
+        clf.fit(X.iloc[tr].to_numpy(), y[tr])
+
+        def _proba(Z):
+            p = clf.predict_proba(Z)
+            if p.shape[1] == 2:
+                return p[:, 1]
+            # una sola clase en el entrenamiento: probabilidad constante
+            return np.full(len(Z), float(clf.classes_[0]))
+
+        p_val = _proba(X.iloc[te].to_numpy()) if len(te) else np.array([])
+        if len(te):
+            umbral = sp.choose_threshold(y[te], p_val)
+            acc_val = float(((p_val >= umbral).astype(int) == y[te]).mean())
+        else:
+            umbral, acc_val = 0.5, float("nan")
+
+        ultimo = d[d["fecha"] == self._ultimo_mes].drop_duplicates(c("id"))
+        p_ult = pd.Series(_proba(ultimo[feats].fillna(0).to_numpy()),
+                          index=ultimo[c("id")].to_numpy())
+        res = self.results.copy()
+        prob = res[c("id")].map(p_ult).astype(float)
+        res["prob_venta"] = prob.to_numpy()
+        res["se_vendera"] = np.where(res["prob_venta"] >= umbral, "Sí", "No")
+        self.results = res
+
+        self.sale_clf = clf
+        self.sale_threshold = float(umbral)
+        self.sale_val_accuracy = acc_val
+        self._sale_n_train = len(tr)
+        self._sale_n_val = len(te)
+
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.results.to_csv(self.output_path, index=False)
+        n_si = int((res["se_vendera"] == "Sí").sum())
+        print(f"[✓] Probabilidad de venta: umbral {umbral:.2f}, exactitud de "
+              f"validación interna {acc_val:.1%}; {n_si:,} de {len(res):,} "
+              f"productos se venderán")
+
     # ── 8. VISUALIZACIÓN ─────────────────────────────────────────────────────
     def plot(self, product_id=None):
         c = self._c
@@ -1128,6 +1217,7 @@ class SalesForecastModel:
         self.train_regressor()
         self.predict_next_month()
         self.estimar_por_promedio()
+        self.agregar_probabilidad_venta()
         self.plot()
         return self.results
 
