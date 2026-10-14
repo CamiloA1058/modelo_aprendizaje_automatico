@@ -1,8 +1,8 @@
-# Datos históricos (V1 a V4)
+# Datos históricos (V1 a V5)
 
 Versiones anteriores del dataset de ventas. Se conservan como referencia y para
 reproducir los scripts de `legacy/`. **El modelo de producción usa solo
-`data/raw/Query_Result_V5.csv`.**
+`data/raw/Query_Result_V6.csv`.**
 
 | Archivo | Registros | Origen | Qué cambia respecto al anterior |
 |---------|-----------|--------|---------------------------------|
@@ -10,7 +10,7 @@ reproducir los scripts de `legacy/`. **El modelo de producción usa solo
 | `Query_Result_V2.csv` (V2) | 87.885 | Consulta B (misma colección de consultas) | Granularidad diaria; agrega `FECHA`, `DIA`, `DIA_SEMANA`, `VENTAS`, `HUBO_PROMOCION`, `TEMPORADA`. Sin filtros. |
 | `Query_Result_V3.csv` (V3) | 86.536 | V2 limpiado fuera de la base de datos | Elimina 1.349 registros cuya descripción contiene `MANTENIMIENTO` o `SOLUCION` (mano de obra y gasolina). No hay consulta SQL de V3. |
 | `Query_Result_V4.csv` (V4) | 78.945 | Consulta C (misma colección de consultas) | Excluye ítems con `VALORU = 1` (sin precio configurado) y grupos con precio promedio <= 10. |
-| `Query_Result_V5.csv` (V5, en `data/raw/`) | 78.921 | `sql/extraccion_ventas_v5.sql` | Filtros adicionales contra datos corruptos (cantidades y totales absurdos, totales cero o negativos). |
+| `Query_Result_V5.csv` (V5) | 78.921 | `sql/extraccion_ventas_v5.sql` | Filtros adicionales contra datos corruptos (cantidades y totales absurdos, totales cero o negativos). **Sin filtro de tipo de documento**: mezcla facturas de venta con ajustes de inventario, pedidos, compras, cotizaciones y devoluciones (solo ~51 % del monto son facturas de venta). Sustituida por la V6. |
 
 Otros archivos:
 

@@ -1,6 +1,6 @@
 """
 Entrena el modelo de produccion (KMeans + Random Forest) sobre el dataset por
-defecto (data/raw/Query_Result_V5.csv) y escribe la prediccion del mes
+defecto (data/raw/Query_Result_V6.csv) y escribe la prediccion del mes
 siguiente en outputs/predictions/PREDICCION_MENSUAL.csv.
 
 Ejecutar desde la raiz del repo:  python scripts/entrenar.py

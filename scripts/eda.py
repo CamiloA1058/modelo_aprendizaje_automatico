@@ -1,7 +1,7 @@
 """
 eda.py
 ======
-Análisis exploratorio de datos (EDA) sobre Query_Result_V5.csv — fase 2
+Análisis exploratorio de datos (EDA) sobre Query_Result_V6.csv — fase 2
 (comprensión de datos) y fase 3 (preparación de datos) de CRISP-DM.
 
 Usa las funciones puras de src/ventas_forecast/eda.py (probadas en
@@ -161,7 +161,7 @@ def main():
 
     # ── Reporte de texto ─────────────────────────────────────────────────────
     lineas = []
-    lineas.append("ANÁLISIS EXPLORATORIO DE DATOS (EDA) — Query_Result_V5.csv")
+    lineas.append("ANÁLISIS EXPLORATORIO DE DATOS (EDA) — Query_Result_V6.csv")
     lineas.append("=" * 70)
 
     lineas.append("")

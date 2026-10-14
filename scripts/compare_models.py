@@ -14,7 +14,7 @@ filas de prueba que el modelo de producción (SalesForecastModel):
      re-entrenado mes a mes (ver src/ventas_forecast/benchmarks.py).
 
 Los scripts legacy scripts/run_xgboost.py y scripts/run_prophet.py corrían
-sobre datasets antiguos (no comparables con Query_Result_V5.csv) y quedan
+sobre datasets antiguos (no comparables con Query_Result_V6.csv) y quedan
 SUPERADOS por este script para la comparación de la tesis.
 
 Genera:

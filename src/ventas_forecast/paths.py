@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_RAW = PROJECT_ROOT / "data" / "raw"
 DATA_HISTORICO = PROJECT_ROOT / "data" / "historico"
-DEFAULT_DATASET = DATA_RAW / "Query_Result_V5.csv"
+DEFAULT_DATASET = DATA_RAW / "Query_Result_V6.csv"
 
 OUTPUTS = PROJECT_ROOT / "outputs"
 FIGURES = OUTPUTS / "figures"

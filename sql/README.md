@@ -5,7 +5,9 @@ Consultas contra la base de datos Firebird del sistema de inventario
 
 | Archivo | Contenido |
 |---------|-----------|
-| `extraccion_ventas_v5.sql` | Consulta vigente. Genera `data/raw/Query_Result_V5.csv`. |
+| `extraccion_ventas_v6.sql` | Consulta vigente. Igual que la V5 pero solo facturas de venta (tipos 1 y 13) no anuladas. Genera `data/raw/Query_Result_V6.csv`. |
+| `extraer_ventas.py` | Extractor offline: ejecuta un `.sql` sobre una copia de la base Firebird y escribe el CSV en el formato exacto de la V5 (`--db --sql --out --desde --hasta`). |
+| `extraccion_ventas_v5.sql` | Consulta anterior (sin filtro de tipo de documento). Genera `data/historico/Query_Result_V5.csv`. |
 | `consultas_versiones_anteriores.sql` | Consultas de V1, V2 y V4, más consultas exploratorias. |
 | `exploracion/explorar_bd.py`, `explorar_bd_v2.py` | Scripts que ejecutan consultas de exploración y exportan CSV. Las credenciales se leen de variables de entorno. |
 | `exploracion/.env.example` | Plantilla de variables de entorno (sin valores). |
@@ -17,19 +19,29 @@ V1  consulta A (mensual por producto)
 V2  consulta B (diaria, sin filtros)
 V3  V2 sin descripciones MANTENIMIENTO / SOLUCION (paso externo, sin SQL)
 V4  consulta C (diaria, VALORU > 1, HAVING AVG(VALORU) > 10)
-V5  extraccion_ventas_v5.sql (filtros adicionales de cantidades y totales)
+V5  extraccion_ventas_v5.sql (filtros adicionales de cantidades y totales; mezcla tipos de documento)
+V6  extraccion_ventas_v6.sql (V5 + solo facturas de venta tipos 1 y 13, no anuladas)
 ```
 
-V1 a V4 están en `data/historico/`; V5 en `data/raw/`.
+V1 a V5 están en `data/historico/`; V6 en `data/raw/`.
 
 ## Cómo obtener el CSV de producción
 
-1. Abrir un cliente Firebird (por ejemplo IBExpert o FlameRobin) conectado a la base.
-2. Ejecutar `extraccion_ventas_v5.sql`. Ajustar el rango de `d.FECHA` en la
-   cláusula `WHERE` si se necesitan meses nuevos.
-3. Exportar el resultado a CSV con separador `;`, números en formato regional
-   (coma decimal, punto de miles) y fechas `dd/mm/aaaa`, con encabezados.
-4. Guardar el archivo como `data/raw/Query_Result_V5.csv` (o subirlo desde el dashboard).
+Trabajar siempre sobre una COPIA de la base, nunca la original. Con el cliente
+Firebird embebido (`fbclient.dll`, sin servidor) y el paquete `firebird-driver`
+(`pip install firebird-driver`):
+
+```bash
+export FIREBIRD_CLIENT=/ruta/a/fbclient.dll   # usuario: FIREBIRD_USER (SYSDBA); clave opcional: FIREBIRD_PASSWORD
+python sql/extraer_ventas.py --db copia.fdb --sql sql/extraccion_ventas_v6.sql     --out data/raw/Query_Result_V6.csv --desde 2024-01-01 --hasta 2026-03-27
+```
+
+El extractor reemplaza el rango de `d.FECHA` del `.sql` por `--desde/--hasta` y
+escribe el CSV con separador `;`, UTF-8 con BOM, CRLF, fechas `dd/mm/aaaa` y
+números con coma decimal y punto de miles, igual que la V5. Alternativa manual:
+ejecutar la consulta en un cliente Firebird y exportar con ese mismo formato.
+El CSV de ventas posteriores al entrenamiento (`data/holdout/`) se genera con la
+misma consulta y otro rango de fechas.
 
 ## Scripts de exploración
 

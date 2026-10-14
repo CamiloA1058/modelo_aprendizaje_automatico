@@ -11,8 +11,8 @@ from ventas_forecast.model import SalesForecastModel  # noqa: E402
 
 
 class TestDefaultPaths(unittest.TestCase):
-    def test_default_dataset_is_v5_in_data_raw(self):
-        self.assertEqual(paths.DEFAULT_DATASET, ROOT / "data" / "raw" / "Query_Result_V5.csv")
+    def test_default_dataset_is_v6_in_data_raw(self):
+        self.assertEqual(paths.DEFAULT_DATASET, ROOT / "data" / "raw" / "Query_Result_V6.csv")
 
     def test_default_prediction_under_outputs_predictions(self):
         self.assertEqual(

@@ -6,7 +6,7 @@ Sistema de predicción de ventas y decisiones de stock (Reforzar / Mantener / Re
 **Código heredado** (no es producción): `legacy/` (primeros pipelines, versiones 1.0 y 2.0, benchmarks sueltos de XGBoost/Prophet).  
 **Modelos de comparación** (benchmark): `scripts/compare_models.py` (RF vs XGBoost vs Prophet vs ARIMA, sobre la misma partición del modelo final).
 
-Dataset vigente: `data/raw/Query_Result_V5.csv` (extracción de ventas reales del taller de los últimos dos años; 78.921 registros diarios, 5.654 productos, 5.074 tras la limpieza de ajustes masivos de inventario).
+Dataset vigente: `data/raw/Query_Result_V6.csv` (facturas de venta reales del taller de los últimos dos años; 48.517 registros diarios, 3.576 productos).
 
 ### Métricas — clasificador (`outputs/reports/evaluacion_modelo.txt`, prueba n=8.942)
 
@@ -88,13 +88,15 @@ modelo_aprendizaje_automatico/
 │   └── eda.py                   # Reporte y figuras de análisis exploratorio
 │
 ├── sql/                         # Extracción desde Firebird
-│   ├── extraccion_ventas_v5.sql # Consulta vigente (genera Query_Result_V5.csv)
+│   ├── extraccion_ventas_v6.sql # Consulta vigente (genera Query_Result_V6.csv)
+│   ├── extraer_ventas.py        # Extractor offline a CSV (formato V5)
 │   ├── consultas_versiones_anteriores.sql
 │   └── exploracion/             # Scripts de exploración (credenciales por variables de entorno)
 │
 ├── data/
-│   ├── raw/                     # Query_Result_V5.csv (producción)
-│   └── historico/               # V1 a V4 y utilidades antiguas
+│   ├── raw/                     # Query_Result_V6.csv (producción)
+│   ├── holdout/                 # Ventas posteriores al entrenamiento (estudio de caso)
+│   └── historico/               # V1 a V5 y utilidades antiguas
 │
 ├── tests/                       # Pruebas (unittest)
 ├── docs/                        # BITACORA.md (histórico) y CHANGELOG.md
@@ -106,8 +108,8 @@ modelo_aprendizaje_automatico/
 
 ## Cómo reentrenar con datos nuevos
 
-1. Ejecutar `sql/extraccion_ventas_v5.sql` en un cliente Firebird y exportar a CSV (instrucciones en [sql/README.md](sql/README.md)).
-2. Guardar el resultado como `data/raw/Query_Result_V5.csv`, o subirlo desde la pestaña "Ejecutar modelo" del dashboard (se guarda en `outputs/uploads/`).
+1. Ejecutar `sql/extraer_ventas.py` con `sql/extraccion_ventas_v6.sql` sobre una copia de la base Firebird (instrucciones en [sql/README.md](sql/README.md)).
+2. Guardar el resultado como `data/raw/Query_Result_V6.csv`, o subirlo desde la pestaña "Ejecutar modelo" del dashboard (se guarda en `outputs/uploads/`).
 3. Entrenar con `python scripts/entrenar.py` o con el botón de ejecución del dashboard.
 4. La predicción queda en `outputs/predictions/PREDICCION_MENSUAL.csv`.
 
@@ -183,7 +185,7 @@ Si no se indica `output_path`, la predicción se escribe en `outputs/predictions
 
 | Ubicación | Uso |
 |-----------|-----|
-| `data/raw/Query_Result_V5.csv` | **Producción**: el modelo, los scripts y el dashboard |
+| `data/raw/Query_Result_V6.csv` | **Producción**: el modelo, los scripts y el dashboard |
 | `data/historico/` | V1 a V4, solo referencia |
 
 Ver [data/historico/README.md](data/historico/README.md) para el linaje V1 a V5 y [sql/README.md](sql/README.md) para la extracción. El detalle de la limpieza aplicada sobre V5 (completado de calendario mensual y exclusión de ajustes masivos de inventario) está en [docs/CHANGELOG.md](docs/CHANGELOG.md).
