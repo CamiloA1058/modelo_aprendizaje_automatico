@@ -164,9 +164,12 @@ def api_summary():
     base_total = float(df[c("total_sold")].sum())
     pred_col   = "ventas_predichas"
     df_con_pred = df[df[pred_col].notna()]
-    # Suma de predicciones por producto: estimación conservadora del total
-    # (el regresor en log1p tiende a subestimar los agregados).
+    # pred_total: suma de la predicción combinada (w*modelo + (1-w)*media de
+    # 3 meses); pred_total_rf: suma del modelo solo, que subestima el total.
     pred_total     = float(df_con_pred[pred_col].sum()) if len(df_con_pred) else 0.0
+    pred_total_rf  = (float(df_con_pred["ventas_predichas_rf"].sum())
+                      if "ventas_predichas_rf" in df_con_pred.columns else pred_total)
+    blend_weight   = getattr(model, "blend_weight", None)
     base_con_pred  = float(df_con_pred[c("total_sold")].sum()) if len(df_con_pred) else 0.0
     variacion      = ((pred_total - base_con_pred) / base_con_pred * 100
                       if base_con_pred > 0 else 0)
@@ -184,10 +187,13 @@ def api_summary():
     # Métricas del modelo
     metricas = model.metrics
 
+    cols_pred = [pred_col] + (["ventas_predichas_rf"]
+                              if "ventas_predichas_rf" in df.columns else [])
+
     # Top productos por probabilidad de crecimiento
     top = (
         df[[c("id"), c("description"), "prob_crecimiento",
-            pred_col, c("total_sold"), "decision", "cluster"]]
+            *cols_pred, c("total_sold"), "decision", "cluster"]]
         .sort_values("prob_crecimiento", ascending=False)
         .head(20)
         .fillna(0)
@@ -202,7 +208,7 @@ def api_summary():
     # Top productos con mayor probabilidad de reducción
     top_risk = (
         df[[c("id"), c("description"), "prob_reduccion",
-            pred_col, c("total_sold"), "decision", "cluster"]]
+            *cols_pred, c("total_sold"), "decision", "cluster"]]
         .sort_values("prob_reduccion", ascending=False)
         .head(20)
         .fillna(0)
@@ -223,6 +229,8 @@ def api_summary():
         "reducir":     reducir,
         "avg_prob":    round(avg_prob * 100, 1),
         "pred_total":  round(pred_total, 0),
+        "pred_total_rf": round(pred_total_rf, 0),
+        "blend_weight": blend_weight,
         "base_total":  round(base_total, 0),
         "variacion":   round(variacion, 1),
         "con_pred":    len(df_con_pred),

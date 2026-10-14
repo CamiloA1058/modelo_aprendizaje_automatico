@@ -238,7 +238,7 @@
         <div class="kpi amber">
           <div class="kpi-label">Ventas predichas</div>
           <div class="kpi-value" id="kpi-pred" style="font-size:20px">—</div>
-          <div class="kpi-sub" id="kpi-variacion">Estimación conservadora</div>
+          <div class="kpi-sub" id="kpi-variacion">Combinación del modelo y el promedio de los últimos 3 meses</div>
         </div>
       </div>
 
@@ -247,7 +247,7 @@
           <div class="section-title">Historial de ventas + predicción del próximo mes</div>
           <div class="legend-row">
             <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1A1916"></span>Ventas reales (productos con predicción de monto)</span>
-            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1D4ED8"></span>Predicción próximo mes (estimación conservadora)</span>
+            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1D4ED8"></span>Predicción próximo mes (modelo combinado)</span>
           </div>
           <div class="chart-wrap" style="height:240px">
             <canvas id="chart-hist" role="img" aria-label="Historial de ventas totales y predicción del próximo mes"></canvas>
@@ -578,7 +578,10 @@ async function loadSummary() {
   document.getElementById('kpi-mantener-pct').textContent = pctMan + '% del total analizado';
   document.getElementById('kpi-reducir-pct').textContent  = pctRed + '% del total analizado';
   document.getElementById('kpi-variacion').textContent =
-    `Estimación conservadora (${fmt(d.con_pred)} productos): el modelo tiende a subestimar el total`;
+    (d.blend_weight != null
+      ? `Combinación del modelo (${Math.round(d.blend_weight * 100)} %) y el promedio de los últimos 3 meses`
+      : 'Combinación del modelo y el promedio de los últimos 3 meses') +
+    ` · ${fmt(d.con_pred)} productos`;
 
   renderHistChart(d.historial, d.pred_total, d.mes_predicho);
   renderDonut(d.reforzar, d.mantener, d.reducir);
@@ -614,7 +617,7 @@ function renderHistChart(historial, pred_total, mes_predicho) {
           pointRadius: 3, pointBackgroundColor: '#1A1916',
         },
         {
-          label: 'Predicción',
+          label: 'Predicción (modelo combinado)',
           data: predData,
           borderColor: '#1D4ED8',
           backgroundColor: 'rgba(29,78,216,.1)',
@@ -795,6 +798,7 @@ async function openDetail(codigo) {
   const prob    = Math.round((p.prob_crecimiento || 0) * 100);
   const base    = p.ventas_base || 0;
   const pred    = p.ventas_predichas || 0;
+  const predRf  = pred > 0 && p.ventas_predichas_rf != null ? p.ventas_predichas_rf : null;
   const varia   = base > 0 && pred > 0 ? ((pred - base) / base * 100) : null;
 
   document.getElementById('detail-content').innerHTML = `
@@ -815,6 +819,7 @@ async function openDetail(codigo) {
         <div class="kpi-label">Predicción ${d.mes_predicho}</div>
         <div class="kpi-value" style="font-size:17px;">${COP(pred)}</div>
         <div class="kpi-sub">${varia != null ? deltaHtml(varia) : '—'}</div>
+        ${predRf != null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;">Solo modelo: ${COP(predRf)}</div>` : ''}
       </div>
       <div class="kpi amber" style="padding:12px 14px;">
         <div class="kpi-label">Prob. crecimiento</div>
@@ -842,7 +847,7 @@ async function openDetail(codigo) {
           <tr style="background:var(--accent-bg);">
             <td style="font-size:12px;font-weight:600;color:var(--accent);">${d.mes_predicho} ★</td>
             <td style="font-weight:600;color:var(--accent);">${COP(pred)}</td>
-            <td colspan="2" style="font-size:12px;color:var(--accent);">Predicción del modelo</td>
+            <td colspan="2" style="font-size:12px;color:var(--accent);">Predicción (modelo combinado)</td>
           </tr>
         </tbody>
       </table>
@@ -862,7 +867,7 @@ async function openDetail(codigo) {
       labels: fechas,
       datasets: [
         { label: 'Ventas reales', data: [...reales, null], borderColor: '#1A1916', tension: .3, pointRadius: 4, pointBackgroundColor: '#1A1916', fill: false },
-        { label: 'Predicción',   data: predArr, borderColor: '#1D4ED8', borderDash: [5,3], tension: 0, pointRadius: 7, pointBackgroundColor: '#1D4ED8', fill: false, spanGaps: false }
+        { label: 'Predicción (modelo combinado)', data: predArr, borderColor: '#1D4ED8', borderDash: [5,3], tension: 0, pointRadius: 7, pointBackgroundColor: '#1D4ED8', fill: false, spanGaps: false }
       ]
     },
     options: {
