@@ -153,6 +153,33 @@ def main():
         )
     lineas.append(f"n_test: {reg_metrics['n_test']}")
 
+    mezcla = model.blend_metrics
+    lineas.append("")
+    lineas.append("Mezcla (modelo + media de 3 meses) — predicción del sistema")
+    lineas.append("-" * 60)
+    lineas.append(
+        f"Predicción = w x RF + (1 - w) x media_3, con w = "
+        f"{model.blend_weight:.1f} elegido solo con esta partición de prueba "
+        f"interna (mínimo |suma predicha - suma real|)."
+    )
+    lineas.append(f"{'Métrica':<16}{'RF':>20}{'Mezcla':>20}{'Media_3':>20}")
+    for k in ("mae", "rmse", "r2", "mase"):
+        lineas.append(
+            f"{k.upper():<16}"
+            f"{reg_metrics[k]:>20,.4f}"
+            f"{mezcla[k]:>20,.4f}"
+            f"{baseline_reg['media_3'][k]:>20,.4f}"
+        )
+    suma_real = float(model.reg_test_results["real"].sum())
+    suma_m3 = float(np.sum(model.reg_test_media_3))
+    lineas.append(
+        f"{'Razón de sumas':<16}"
+        f"{reg_metrics['sum_ratio']:>20,.4f}"
+        f"{mezcla['sum_ratio']:>20,.4f}"
+        f"{suma_m3 / suma_real:>20,.4f}"
+    )
+    lineas.append("Razón de sumas = suma predicha / suma real en la prueba.")
+
     elapsed = time.time() - inicio
     lineas.append("")
     lineas.append(f"Tiempo total: {elapsed:.1f} s")

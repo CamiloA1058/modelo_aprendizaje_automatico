@@ -73,7 +73,7 @@ def procesar_mes(mes, tmp):
     res, escala, _, model = ec.evaluar_mes(mes, tmp, con_modelo=True)
     c = model._c
     feats = model._features
-    m = res[res["ventas_predichas"].notna()].copy()
+    m = res[res["ventas_predichas_rf"].notna()].copy()
 
     # Entrenamiento y validacion interna (igual que train_regressor)
     d = model._df_train
@@ -87,7 +87,8 @@ def procesar_mes(mes, tmp):
     y_tr = d_tr["target"].to_numpy()
 
     # Predicciones puntuales sobre el mes objetivo
-    pred = {"base": m["ventas_predichas"].to_numpy(), "media_3": m["media_3"].to_numpy()}
+    # "base" = RF puro: ventas_predichas ya es la mezcla del sistema.
+    pred = {"base": m["ventas_predichas_rf"].to_numpy(), "media_3": m["media_3"].to_numpy()}
     pred["op1"] = im.topdown_reconcile(m["media_3"].sum(), pred["base"])
 
     # Op.1b: media de los ultimos 3 meses de la serie agregada de los mismos productos

@@ -94,9 +94,12 @@ def evaluar_mes(mes, tmp_dir, con_modelo=False):
 def resumen_mes(res, escala, mayoritaria):
     dec = cs.classification_summary(res["clase_real"], res["clase_pred"])
     base = cs.majority_baseline_summary(res["clase_real"], mayoritaria)
-    m = res[res["ventas_predichas"].notna()]
+    m = res[res["ventas_predichas_rf"].notna()]
+    # "modelo" = Random Forest puro; "mezcla" = prediccion del sistema
+    # (w*RF + (1-w)*media_3, w elegido con la validacion interna de cada mes).
     reg = {
-        "modelo": cs.regression_summary(m["real"], m["ventas_predichas"], escala),
+        "modelo": cs.regression_summary(m["real"], m["ventas_predichas_rf"], escala),
+        "mezcla": cs.regression_summary(m["real"], m["ventas_predichas"], escala),
         "ingenuo": cs.regression_summary(m["real"], m["actual"], escala),
         "media_3": cs.regression_summary(m["real"], m["media_3"], escala),
     }
@@ -105,9 +108,10 @@ def resumen_mes(res, escala, mayoritaria):
 
 def sumas_mes(res, ventas_mes):
     """Sumas en COP sobre los productos con prediccion de monto y venta real total del mes."""
-    m = res[res["ventas_predichas"].notna()]
+    m = res[res["ventas_predichas_rf"].notna()]
     return {
-        "suma_pred_modelo": float(m["ventas_predichas"].sum()),
+        "suma_pred_modelo": float(m["ventas_predichas_rf"].sum()),
+        "suma_pred_mezcla": float(m["ventas_predichas"].sum()),
         "suma_real_con_pred": float(m["real"].sum()),
         "suma_ingenuo": float(m["actual"].sum()),
         "suma_media_3": float(m["media_3"].sum()),
@@ -145,7 +149,7 @@ def bloque_texto(titulo, dec, base, reg, sumas):
         L.append(f"  {nombre:<10}{r['mae']:>14,.0f}{r['rmse']:>14,.0f}"
                  f"{r['mase']:>9.4f}{r['sum_ratio']:>16.4f}")
     L.append("Sumas en COP (productos con prediccion de monto):")
-    L.append(f"  modelo {sumas['suma_pred_modelo']:>15,.0f} | real {sumas['suma_real_con_pred']:>15,.0f} | "
+    L.append(f"  modelo {sumas['suma_pred_modelo']:>15,.0f} | mezcla {sumas['suma_pred_mezcla']:>15,.0f} | real {sumas['suma_real_con_pred']:>15,.0f} | "
              f"ingenuo {sumas['suma_ingenuo']:>15,.0f} | media_3 {sumas['suma_media_3']:>15,.0f}")
     L.append(f"  ventas reales totales del mes (todos los productos): {sumas['ventas_reales_mes']:,.0f}")
     L.append("")
@@ -208,7 +212,7 @@ def main():
             filas.append(fila_csv(mes, dec, base, reg, sumas))
             lineas_mes += bloque_texto(f"MES {mes}", dec, base, reg, sumas)
             todos.append(res)
-            escalas.append((escala, int(res["ventas_predichas"].notna().sum())))
+            escalas.append((escala, int(res["ventas_predichas_rf"].notna().sum())))
             mayoritarias.append(mayoritaria)
 
     pool = pd.concat(todos, ignore_index=True)
@@ -233,10 +237,11 @@ def main():
     L += lineas_mes
     L += bloque_texto("AGRUPADO (todos los meses)", dec_p, base_p, reg_p, sumas_p)
     L += ["RESUMEN DE SUMAS EN PESOS POR MES (millones de COP)", "-" * 70,
-          f"{'Mes':<10}{'Pred. modelo':>14}{'Real (con pred.)':>18}{'Ingenuo':>10}"
+          f"{'Mes':<10}{'Pred. modelo':>14}{'Pred. mezcla':>14}{'Real (con pred.)':>18}{'Ingenuo':>10}"
           f"{'Media_3':>10}{'Ventas reales mes':>19}"]
     for f in filas:
         L.append(f"{f['mes']:<10}{f['suma_pred_modelo'] / 1e6:>14,.1f}"
+                 f"{f['suma_pred_mezcla'] / 1e6:>14,.1f}"
                  f"{f['suma_real_con_pred'] / 1e6:>18,.1f}{f['suma_ingenuo'] / 1e6:>10,.1f}"
                  f"{f['suma_media_3'] / 1e6:>10,.1f}{f['ventas_reales_mes'] / 1e6:>19,.1f}")
     L.append("")
