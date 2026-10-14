@@ -59,7 +59,7 @@ DEFAULT_COL_MAP = {
 
 # ── Hiperparámetros del clasificador (RandomForest) ──────────────────────────
 # Valores seleccionados con tune_classifier() (GridSearchCV + TimeSeriesSplit
-# mensual) sobre Query_Result_V5.csv; ver scripts/tune_rf.py. Re-ajustados
+# mensual) sobre Query_Result_V5.csv (reconfirmados con Query_Result_V6.csv, sin cambios); ver scripts/tune_rf.py. Re-ajustados
 # con scoring="f1_macro" (ver CHANGELOG 2026-09-23 "métrica macro"): al
 # seleccionar por F1 macro en vez de F1 ponderado, max_depth pasa de None a
 # 14 y min_samples_leaf de 1 a 5 (un modelo algo menos profundo/más regular

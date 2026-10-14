@@ -1,5 +1,145 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Datos] V6: solo facturas de venta - 2026-10-13
+
+### Problema
+
+La consulta V5 (`sql/extraccion_ventas_v5.sql`) no filtraba el tipo de documento (`DOCINV.IDTIPODOCINV`) ni los anulados. Sobre la base del taller, en el periodo de la V5 solo ~51 % del monto (`TOTAL_VENDIDO`) eran facturas de venta (tipos 1 y 13); el resto eran ajustes de inventario (tipos 10 y 11, ~35 %), pedidos (5), compras (2), cotizaciones (6) y devoluciones (4), más 128 documentos anulados. El modelo se entrenaba, entonces, con una demanda que no era venta.
+
+### Cambio de SQL
+
+`sql/extraccion_ventas_v6.sql` es idéntica a la V5 (columnas, orden, `GROUP BY`, filtros y `HAVING`) más `d.IDTIPODOCINV IN (1, 13)` y `d.ANULADO = '0'`. Las devoluciones en ventas (tipo 4) se **excluyen** y no se restan: son 30 documentos, 4.123.300 COP y 58 unidades en el periodo (0,06 % del monto V6). Nuevo extractor offline `sql/extraer_ventas.py` (`--db --sql --out --desde --hasta`; cliente Firebird embebido por `FIREBIRD_CLIENT`, usuario y clave por variables de entorno) que escribe el CSV en el formato exacto de la V5; el cargador existente lo lee sin cambios. Con él se generaron `data/raw/Query_Result_V6.csv` (misma ventana que la V5) y `data/holdout/ventas_2026_04_09.csv` (ventas posteriores, solo para el estudio de caso fuera de muestra). `Query_Result_V5.csv` pasó a `data/historico/` y `paths.DEFAULT_DATASET` apunta a la V6. Las extracciones se hicieron sobre una copia de la base; la original no se tocó.
+
+### Dataset V5 vs V6 (2024-01-09 a 2026-03-27)
+
+| | V5 | V6 | V6 / V5 |
+|---|---:|---:|---:|
+| Filas (producto-día) | 78.921 | 48.517 | 61,5 % |
+| Productos | 5.654 | 3.576 | 63,2 % |
+| Monto total (COP) | 13.323.312.035 | 6.741.707.924 | 50,6 % |
+| Filas excluidas por `remove_bulk_adjustments` | 1.761 (1 fecha: 19/02/2026, 2.345.652 COP) | 0 | |
+| Productos tras limpieza | 5.074 | 3.576 | |
+
+El caso del 19/02/2026 era mayormente de pedidos y ajustes y desaparece con el filtro de tipo; `remove_bulk_adjustments` se conserva, pero ya no elimina nada en la V6. El holdout (2026-03-28 a 2026-09-22, últimos datos de la base): 13.807 filas, 2.465 productos, 3.029.726.979 COP.
+
+Monto mensual: la V6 es 20-38 % de la V5 entre feb-2024 y abr-2025 y 50-73 % desde may-2025 (p. ej. feb-2024: 463,1 M vs 91,7 M; jul-2025: 1.061,6 M vs 765,7 M).
+
+### Caída de facturación feb-2024 a abr-2025 (solo documentación)
+
+Las facturas pasan de ~1.500 a ~450 por mes entre feb-2024 y abr-2025 y se recuperan en may-2025. Decisión del usuario: se mantiene el mismo periodo que la V5 y ese tramo se usa tal cual. Verificación contable (cuenta de ingresos 4135.06, crédito menos débito, asientos no anulados) frente a facturas 1+13, en millones de COP:
+
+| Mes | Ingresos contables | Facturas |
+|---|---:|---:|
+| 2023-12 | 252,8 | 253,1 |
+| 2024-01 | 278,0 | 278,4 |
+| 2024-02 | 29,6 | 91,7 |
+| 2024-03 | 56,6 | 56,6 |
+| 2024-06 | 70,7 | 75,5 |
+| 2024-10 | 104,5 | 112,1 |
+| 2025-03 | 97,6 | 101,3 |
+| 2025-04 | 160,3 | 162,8 |
+| 2025-05 | 354,7 | 357,8 |
+| 2025-07 | 764,3 | 765,7 |
+
+La contabilidad cae igual que las facturas (salvo feb-2024, donde las facturas superan a lo contabilizado): no es un hueco de registro del inventario. La base no permite distinguir una caída real de ventas de ventas registradas fuera del sistema.
+
+### Antes (V5) y después (V6) del pipeline completo
+
+Los números "antes" salen de los reportes previos (`eda_resumen.txt`, `seleccion_k_kmeans.csv`, `tuning_rf_resumen.txt`, `evaluacion_modelo.txt`, `comparacion_modelos.txt`); los "después", de los reportes regenerados con la V6 (`scripts/eda.py`, `select_k.py`, `tune_rf.py`, `evaluate_model.py`, `compare_models.py`). La razón suma predicha/real no está en los reportes: se calculó con `reg_test_results` de `train_regressor()` (V5: 0,5585, coincide con la entrada del 2026-10-02).
+
+**EDA**
+
+| | V5 | V6 |
+|---|---:|---:|
+| Filas producto-mes tras calendario completo | 99.765 | 66.236 |
+| Productos tras limpieza | 5.074 | 3.576 |
+| Producto-mes con venta cero | 66,53 % | 65,53 % |
+| Mediana de meses en cero por producto (Q1 / Q3) | 76,47 % (50,00 / 88,89) | 75,00 % (51,85 / 87,50) |
+| Pareto A / B / C (productos) | 532 (10,5 %) / 960 (18,9 %) / 3.582 (70,6 %) | 385 (10,8 %) / 661 (18,5 %) / 2.530 (70,7 %) |
+| Ventas de A / B / C | 79,99 / 15,01 / 5,01 % | 79,99 / 15,01 / 5,00 % |
+
+La intermitencia y el Pareto se mantienen casi iguales. El perfil estacional por mes cambia de nivel pero conserva el máximo en julio (promedio de julio: 681,1 M en V5 y 436,9 M en V6).
+
+**Selección de k (silueta)**
+
+| k | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| V5 | 0,3557 | 0,3753 | 0,3297 | 0,3361 | 0,3402 | 0,3508 | 0,3178 | 0,3220 | 0,3237 |
+| V6 | 0,3598 | 0,3940 | 0,3427 | 0,3572 | 0,3588 | 0,3687 | 0,3433 | 0,3488 | 0,3440 |
+
+k = 3 sigue teniendo la mayor silueta (0,3940).
+
+**Ajuste de hiperparámetros del clasificador**
+
+| | V5 | V6 |
+|---|---|---|
+| Mejores parámetros | `max_depth` 14, `min_samples_leaf` 3, `n_estimators` 300 | idénticos |
+| F1 macro en validación cruzada | 0,4403 ± 0,0195 | 0,4366 ± 0,0131 |
+| F1 macro de prueba, por defecto / ajustado | 0,4544 / 0,4525 | 0,4507 / 0,4507 |
+| Acc. balanceada de prueba, por defecto / ajustado | 0,5087 / 0,5016 | 0,5166 / 0,5166 |
+
+`DEFAULT_CLF_PARAMS` no cambia (ya coincide con los mejores parámetros; el reporte V5 mostraba `min_samples_leaf` 5 como "por defecto" por ser anterior a la actualización del 2026-09-23).
+
+**Clasificador (prueba)**
+
+| | V5 | V6 |
+|---|---:|---:|
+| n prueba | 8.942 | 6.255 |
+| Distribución Reducir / Mantener / Reforzar | 78,42 / 3,81 / 17,77 % | 80,18 / 3,13 / 16,69 % |
+| F1 macro | 0,4525 | 0,4507 |
+| Accuracy balanceada | 0,5016 | 0,5166 |
+| Accuracy | 0,6751 | 0,6614 |
+| F1 ponderado | 0,7083 | 0,7089 |
+| F1 Reducir / Mantener / Reforzar | 0,79 / 0,08 / 0,49 | 0,78 / 0,10 / 0,47 |
+| Línea base mayoritaria: F1 macro / acc. balanceada / accuracy / F1 ponderado | 0,2930 / 0,3333 / 0,7842 / 0,6893 | 0,2967 / 0,3333 / 0,8018 / 0,7135 |
+
+Matriz de confusión V6 (filas = real; orden Reducir, Mantener, Reforzar): [3427, 568, 1020], [77, 45, 74], [250, 129, 665]. La clase "Mantener" sigue siendo la débil (precisión 0,06, recall 0,23).
+
+**Regresor (prueba, top productos)**
+
+| | V5 | V6 |
+|---|---:|---:|
+| n prueba | 5.062 | 4.482 |
+| MAE modelo / ingenuo / media_3 | 385.016 / 644.901 / 493.789 | 244.042 / 431.137 / 315.215 |
+| RMSE modelo / ingenuo / media_3 | 1.244.584 / 1.651.228 / 1.232.872 | 973.944 / 1.273.318 / 929.992 |
+| R² modelo / ingenuo / media_3 | 0,6005 / 0,2969 / 0,6080 | 0,4744 / 0,1016 / 0,5208 |
+| MASE modelo / ingenuo / media_3 | 0,8887 / 1,4885 / 1,1397 | 1,0748 / 1,8988 / 1,3883 |
+| Razón suma predicha / suma real | 0,5585 | 0,6717 |
+
+El MASE del modelo en V6 (1,0748) supera 1 (el error de prueba es mayor que el error ingenuo dentro de la muestra de entrenamiento), aunque sigue siendo el menor frente a ingenuo y media_3; media_3 supera al modelo en RMSE y R², como ya ocurría en R² con la V5.
+
+**Comparación de modelos**
+
+| Clasificador | RF V5 | RF V6 | XGBoost V5 | XGBoost V6 | Mayoritaria V5 | Mayoritaria V6 |
+|---|---:|---:|---:|---:|---:|---:|
+| F1 macro | 0,4525 | 0,4507 | 0,4451 | 0,4350 | 0,2930 | 0,2967 |
+| Acc. balanceada | 0,5016 | 0,5166 | 0,5116 | 0,5190 | 0,3333 | 0,3333 |
+| Accuracy | 0,6751 | 0,6614 | 0,6190 | 0,6096 | 0,7842 | 0,8018 |
+| F1 ponderado | 0,7083 | 0,7089 | 0,6807 | 0,6790 | 0,6893 | 0,7135 |
+
+| Regresión A (prueba completa) | RF V5 / V6 | XGBoost V5 / V6 | Ingenuo V5 / V6 | Media_3 V5 / V6 |
+|---|---:|---:|---:|---:|
+| MAE | 385.016 / 244.042 | 428.863 / 258.181 | 644.901 / 431.137 | 493.789 / 315.215 |
+| RMSE | 1.244.584 / 973.944 | 1.440.961 / 1.041.222 | 1.651.228 / 1.273.318 | 1.232.872 / 929.992 |
+| R² | 0,6005 / 0,4744 | 0,4645 / 0,3993 | 0,2969 / 0,1016 | 0,6080 / 0,5208 |
+| MASE | 0,8887 / 1,0748 | 0,9899 / 1,1371 | 1,4885 / 1,8988 | 1,1397 / 1,3883 |
+
+| Regresión B (muestra; V5 n=371, V6 n=339) | RF V5 / V6 | XGBoost V5 / V6 | Ingenuo V5 / V6 | Media_3 V5 / V6 | ARIMA V5 / V6 | Prophet V5 / V6 |
+|---|---:|---:|---:|---:|---:|---:|
+| MAE | 296.272 / 146.781 | 344.308 / 154.674 | 451.419 / 311.407 | 367.612 / 234.136 | 320.998 / 214.765 | 310.613 / 191.777 |
+| RMSE | 1.050.444 / 648.571 | 1.167.985 / 661.352 | 1.018.441 / 917.584 | 917.032 / 701.747 | 944.640 / 821.210 | 927.276 / 708.384 |
+| R² | 0,5085 / 0,0902 | 0,3924 / 0,0539 | 0,5380 / -0,8211 | 0,6254 / -0,0652 | 0,6025 / -0,4587 | 0,6170 / -0,0854 |
+| MASE | 0,6838 / 0,6465 | 0,7947 / 0,6812 | 1,0419 / 1,3715 | 0,8485 / 1,0312 | 0,7409 / 0,9459 | 0,7169 / 0,8446 |
+
+El orden por MAE y MASE se mantiene (RF mejor; luego XGBoost y los modelos de serie de tiempo; ingenuo al final). En la regresión B con la V6 solo RF y XGBoost conservan R² positivo.
+
+### Qué cambia en la narrativa
+
+- La intermitencia (65,5 % de producto-mes en cero) y el Pareto (cerca de 11 % de los productos reúnen 80 % de las ventas) no dependían de la mezcla de documentos.
+- El clasificador conserva su F1 macro (0,45) y supera con claridad a la línea base mayoritaria (0,30); Mantener sigue siendo la clase débil.
+- Los errores absolutos del regresor bajan (la escala de ventas es menor) y el sesgo a la baja de la suma disminuye (razón 0,67 frente a 0,56), pero el MASE queda sobre 1 y media_3 supera al modelo en RMSE y R².
+- k = 3 y los hiperparámetros se mantienen; no hay decisión pendiente sobre ellos.
+
 ## [Reestructuración] - 2026-10-03 (organización del repositorio)
 
 Reorganización sin cambios en la lógica del modelo: las métricas de `outputs/reports/evaluacion_modelo.txt` son idénticas antes y después. Las entradas siguientes de este historial (y `docs/BITACORA.md`) citan las rutas antiguas tal como eran en su fecha.
