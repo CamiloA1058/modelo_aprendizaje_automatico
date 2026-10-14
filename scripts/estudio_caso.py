@@ -100,7 +100,19 @@ def resumen_mes(res, escala, mayoritaria):
     return dec, base, reg
 
 
-def fila_csv(mes, dec, base, reg):
+def sumas_mes(res, ventas_mes):
+    """Sumas en COP sobre los productos con prediccion de monto y venta real total del mes."""
+    m = res[res["ventas_predichas"].notna()]
+    return {
+        "suma_pred_modelo": float(m["ventas_predichas"].sum()),
+        "suma_real_con_pred": float(m["real"].sum()),
+        "suma_ingenuo": float(m["actual"].sum()),
+        "suma_media_3": float(m["media_3"].sum()),
+        "ventas_reales_mes": float(ventas_mes),
+    }
+
+
+def fila_csv(mes, dec, base, reg, sumas):
     fila = {
         "mes": mes, "n_decisiones": dec["n"],
         "f1_macro": dec["f1_macro"], "acc_balanceada": dec["balanced_accuracy"],
@@ -111,10 +123,11 @@ def fila_csv(mes, dec, base, reg):
     for nombre, r in reg.items():
         for k in ("mae", "rmse", "mase", "sum_ratio"):
             fila[f"{k}_{nombre}"] = r[k]
+    fila.update(sumas)
     return fila
 
 
-def bloque_texto(titulo, dec, base, reg):
+def bloque_texto(titulo, dec, base, reg, sumas):
     L = [titulo, "-" * 70]
     L.append(f"Decisiones (n={dec['n']:,}): F1 macro {dec['f1_macro']:.4f} | "
              f"acc. balanceada {dec['balanced_accuracy']:.4f} | accuracy {dec['accuracy']:.4f}")
@@ -128,6 +141,10 @@ def bloque_texto(titulo, dec, base, reg):
     for nombre, r in reg.items():
         L.append(f"  {nombre:<10}{r['mae']:>14,.0f}{r['rmse']:>14,.0f}"
                  f"{r['mase']:>9.4f}{r['sum_ratio']:>16.4f}")
+    L.append("Sumas en COP (productos con prediccion de monto):")
+    L.append(f"  modelo {sumas['suma_pred_modelo']:>15,.0f} | real {sumas['suma_real_con_pred']:>15,.0f} | "
+             f"ingenuo {sumas['suma_ingenuo']:>15,.0f} | media_3 {sumas['suma_media_3']:>15,.0f}")
+    L.append(f"  ventas reales totales del mes (todos los productos): {sumas['ventas_reales_mes']:,.0f}")
     L.append("")
     return L
 
@@ -177,13 +194,16 @@ def figura(filas, salida):
 def main():
     inicio = time.time()
     ensure_output_dirs()
-    todos, filas, lineas_mes, escalas, mayoritarias = [], [], [], [], []
+    todos, filas, lineas_mes, escalas, mayoritarias, sumas_todas = [], [], [], [], [], []
     with tempfile.TemporaryDirectory() as tmp:
         for mes in MESES:
             res, escala, mayoritaria = evaluar_mes(mes, tmp)
             dec, base, reg = resumen_mes(res, escala, mayoritaria)
-            filas.append(fila_csv(mes, dec, base, reg))
-            lineas_mes += bloque_texto(f"MES {mes}", dec, base, reg)
+            ventas_mes = cs.monthly_sales(HOLDOUT, mes).sum()
+            sumas = sumas_mes(res, ventas_mes)
+            sumas_todas.append(sumas)
+            filas.append(fila_csv(mes, dec, base, reg, sumas))
+            lineas_mes += bloque_texto(f"MES {mes}", dec, base, reg, sumas)
             todos.append(res)
             escalas.append((escala, int(res["ventas_predichas"].notna().sum())))
             mayoritarias.append(mayoritaria)
@@ -191,7 +211,8 @@ def main():
     pool = pd.concat(todos, ignore_index=True)
     escala_p = cs.pooled_scale(escalas)
     dec_p, base_p, reg_p = resumen_mes(pool, escala_p, 0)
-    filas.append(fila_csv("agrupado", dec_p, base_p, reg_p))
+    sumas_p = {k: sum(x[k] for x in sumas_todas) for k in sumas_todas[0]}
+    filas.append(fila_csv("agrupado", dec_p, base_p, reg_p, sumas_p))
 
     L = ["ESTUDIO DE CASO FUERA DE MUESTRA (origen rodante)", "=" * 70, "",
          "Para cada mes M se entrena con la V6 mas el holdout anterior a M (nunca M) y se "
@@ -207,7 +228,15 @@ def main():
          "Nota: el holdout llega hasta el 22 de septiembre, asi que las ventas reales de "
          "septiembre estan incompletas (favorece a Reducir y baja la razon de sumas).", ""]
     L += lineas_mes
-    L += bloque_texto("AGRUPADO (todos los meses)", dec_p, base_p, reg_p)
+    L += bloque_texto("AGRUPADO (todos los meses)", dec_p, base_p, reg_p, sumas_p)
+    L += ["RESUMEN DE SUMAS EN PESOS POR MES (millones de COP)", "-" * 70,
+          f"{'Mes':<10}{'Pred. modelo':>14}{'Real (con pred.)':>18}{'Ingenuo':>10}"
+          f"{'Media_3':>10}{'Ventas reales mes':>19}"]
+    for f in filas:
+        L.append(f"{f['mes']:<10}{f['suma_pred_modelo'] / 1e6:>14,.1f}"
+                 f"{f['suma_real_con_pred'] / 1e6:>18,.1f}{f['suma_ingenuo'] / 1e6:>10,.1f}"
+                 f"{f['suma_media_3'] / 1e6:>10,.1f}{f['ventas_reales_mes'] / 1e6:>19,.1f}")
+    L.append("")
     L.append(f"Tiempo total: {time.time() - inicio:.1f} s")
     texto = "\n".join(L)
     print("\n" + texto)
