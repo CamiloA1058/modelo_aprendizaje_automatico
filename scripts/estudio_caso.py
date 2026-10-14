@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast import case_study as cs  # noqa: E402
+from ventas_forecast import eligibility as el  # noqa: E402
 from ventas_forecast.model import SalesForecastModel  # noqa: E402
 from ventas_forecast.paths import (  # noqa: E402
     DEFAULT_DATASET, FIGURES, PROJECT_ROOT, REPORTS, ensure_output_dirs,
@@ -50,11 +51,14 @@ COLOR_INK = "#52514e"
 COLOR_SURFACE = "#fcfcfb"
 
 
-def evaluar_mes(mes, tmp_dir, con_modelo=False, dataset=None, sample_weight_fn=None):
+def evaluar_mes(mes, tmp_dir, con_modelo=False, dataset=None, sample_weight_fn=None,
+                elegibilidad_ampliada=False):
     """Entrena con datos < mes, predice mes y devuelve (filas, escala, mayoritaria);
     con con_modelo=True devuelve ademas el modelo entrenado como cuarto valor.
     dataset (ruta) y sample_weight_fn solo los usan los experimentos; por
-    defecto se entrena con DEFAULT_DATASET y sin pesos."""
+    defecto se entrena con DEFAULT_DATASET y sin pesos. elegibilidad_ampliada
+    (experimento) tambien predice productos sin ventas el ultimo mes; su clase
+    real se mide contra media_3 (ver ventas_forecast.eligibility)."""
     ruta = Path(tmp_dir) / f"entrenamiento_{mes}.csv"
     with open(ruta, "w", encoding="utf-8-sig", newline="") as fh:
         n = cs.combine_training(dataset or DEFAULT_DATASET, HOLDOUT, mes, fh)
@@ -62,6 +66,7 @@ def evaluar_mes(mes, tmp_dir, con_modelo=False, dataset=None, sample_weight_fn=N
 
     model = SalesForecastModel(
         filepath=ruta, output_path=Path(tmp_dir) / f"pred_{mes}.csv", min_months=6,
+        elegibilidad_ampliada=elegibilidad_ampliada,
     )
     model.sample_weight_fn = sample_weight_fn
     model.load_and_clean()
@@ -81,8 +86,12 @@ def evaluar_mes(mes, tmp_dir, con_modelo=False, dataset=None, sample_weight_fn=N
     res["media_3"] = model.df_predict.loc[res.index, "media_3_actual"].to_numpy()
     res["media_3"] = res["media_3"].fillna(res["actual"])
     res["real"] = cs.monthly_sales(HOLDOUT, mes).reindex(res["id"]).fillna(0.0).to_numpy()
-    res["clase_real"] = cs.real_class(res["real"], res["actual"], model.growth_threshold,
-                                      model.reduce_threshold)
+    # Base de la decision: mes actual (produccion, siempre > 0) o media_3 si el
+    # producto no vendio el ultimo mes (solo con elegibilidad ampliada).
+    res["base_decision"] = el.decision_base(res["actual"], res["media_3"])
+    res["nuevo"] = res["actual"] <= 0
+    res["clase_real"] = cs.real_class(res["real"], res["base_decision"],
+                                      model.growth_threshold, model.reduce_threshold)
     res["clase_pred"] = res["decision"].map(DECISION_A_CLASE)
     res["mes"] = mes
 

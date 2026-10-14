@@ -1,5 +1,85 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Experimento] Elegibilidad ampliada - 2026-10-13
+
+Experimento sin cambios en el comportamiento de producción: `SalesForecastModel` gana el parámetro opcional `elegibilidad_ampliada` (por defecto `False`; con `False` el conjunto elegible, las etiquetas, la partición y las predicciones son los de siempre, verificado con pruebas) y los ayudantes puros viven en `src/ventas_forecast/eligibility.py`. El modelo, el dashboard y `entrenar.py` no cambian. Informe: `outputs/reports/experimento_elegibilidad.txt/.csv`; figura `outputs/figures/experimento_elegibilidad.png` (`outputs/` no se versiona; se regenera con `scripts/experimento_elegibilidad.py`).
+
+Problema: hoy solo se predice un producto si vendió en el último mes. En abril de 2026 los productos del top 1900 sin ventas en marzo quedaban fuera, aunque muchos vendieron en abril.
+
+**Regla de la variante.** Además de los productos con ventas en el último mes, se entrenan y predicen los que NO vendieron el último mes pero tienen `media_3 > 0` (media de los últimos 3 meses, incluido el mes actual en cero, es decir, vendieron en alguno de los 2 meses anteriores) y al menos `min_months` meses con ventas. Para esos productos la base del "mes actual" es `media_3`:
+
+- Etiquetas de entrenamiento: se agregan las filas con mes actual 0 y `media_3 > 0`; razón = ventas del mes siguiente / `media_3`, con los mismos umbrales (1,15 / 0,90); mes siguiente en cero => Reducir. Las filas de producción conservan su etiqueta y su partición entrenamiento/prueba (las nuevas van a entrenamiento si son anteriores a la primera fila de prueba del producto); solo se agregan filas. Entran también al regresor y al clustering, que usan el mismo marco.
+- Predicción: clasificador y regresor como siempre; monto en RF y en la mezcla w*RF + (1-w)*`media_3` con el w de la validación interna de cada mes.
+- Clase real en el estudio de caso: ventas reales del mes objetivo contra la misma base (`media_3`) con los mismos umbrales.
+- Equivalente más limpio: una sola base de decisión `base = ventas del mes actual si > 0, si no media_3` (función `decision_base`); para producción coincide con la regla de siempre.
+
+Evaluación: mismo estudio de caso de origen rodante (2026-04 a 2026-09, entrenamiento estrictamente anterior a cada mes, ventas reales del holdout; septiembre incompleto). El MASE usa la escala de la Base. Nada se eligió con el holdout. "Previos" son los productos que la Base ya predice; "nuevos", los que agrega la variante.
+
+### Cobertura (millones de COP)
+
+| Mes | Variante | Con decisión | Con monto | Real con monto | Real top 1900 | Cobertura | Real tienda |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 2026-04 | Base | 697 | 645 | 302,4 | 416,0 | 0,727 | 452,9 |
+| 2026-04 | Ampliada | 1.080 | 993 | 363,2 | 416,0 | 0,873 | 452,9 |
+| 2026-05 | Base | 760 | 709 | 356,5 | 522,4 | 0,682 | 586,3 |
+| 2026-05 | Ampliada | 1.121 | 1.015 | 418,7 | 522,4 | 0,802 | 586,3 |
+| 2026-06 | Base | 764 | 690 | 230,5 | 306,6 | 0,752 | 337,3 |
+| 2026-06 | Ampliada | 1.137 | 1.022 | 263,0 | 306,6 | 0,858 | 337,3 |
+| 2026-07 | Base | 724 | 664 | 277,6 | 405,4 | 0,685 | 440,5 |
+| 2026-07 | Ampliada | 1.163 | 1.042 | 348,6 | 405,4 | 0,860 | 440,5 |
+| 2026-08 | Base | 759 | 678 | 323,8 | 430,7 | 0,752 | 481,2 |
+| 2026-08 | Ampliada | 1.165 | 1.023 | 372,1 | 430,7 | 0,864 | 481,2 |
+| 2026-09 | Base | 856 | 769 | 301,4 | 427,0 | 0,706 | 462,4 |
+| 2026-09 | Ampliada | 1.205 | 1.050 | 354,4 | 427,0 | 0,830 | 462,4 |
+| Agrupado | Base | 4.560 | 4.155 | 1.792,1 | 2.507,9 | 0,715 | 2.760,6 |
+| Agrupado | Ampliada | 6.871 | 6.145 | 2.119,9 | 2.507,9 | 0,845 | 2.760,6 |
+
+### Total predicho (mezcla) frente a lo que realmente vendieron los productos del top 1900 (millones de COP)
+
+| Mes | Real top 1900 | Base mezcla | Ampliada mezcla | Base RF | Ampliada RF | Base/real | Ampliada/real |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2026-04 | 416,0 | 247,0 | 280,9 | 163,4 | 157,1 | 0,594 | 0,675 |
+| 2026-05 | 522,4 | 269,2 | 308,6 | 151,7 | 153,9 | 0,515 | 0,591 |
+| 2026-06 | 306,6 | 327,6 | 369,2 | 184,7 | 176,4 | 1,069 | 1,204 |
+| 2026-07 | 405,4 | 259,4 | 310,8 | 127,9 | 127,7 | 0,640 | 0,767 |
+| 2026-08 | 430,7 | 266,0 | 309,7 | 132,5 | 138,5 | 0,618 | 0,719 |
+| 2026-09 | 427,0 | 256,3 | 284,7 | 120,6 | 121,7 | 0,600 | 0,667 |
+| Agrupado | 2.507,9 | 1.625,5 | 1.863,9 | 880,7 | 875,3 | 0,648 | 0,743 |
+
+### Decisiones, agrupado (6 meses)
+
+| Conjunto | n | F1 macro | Acc. balanceada | Accuracy | Mayoritaria (accuracy) | % Reforzar pred. / real |
+|---|---:|---:|---:|---:|---:|---:|
+| Base, todos | 4.560 | 0,4243 | 0,4575 | 0,5682 | 0,6489 | 54,2 / 29,2 |
+| Ampliada, todos | 6.871 | 0,4067 | 0,4478 | 0,5282 | 0,6586 | 55,6 / 29,3 |
+| Ampliada, previos | 4.560 | 0,4335 | 0,4706 | 0,5553 | 0,6489 | 50,1 / 29,2 |
+| Ampliada, nuevos | 2.311 | 0,3299 | 0,3804 | 0,4747 | 0,6776 | 66,3 / 29,6 |
+
+### Montos, agrupado (productos con monto; MASE con la escala de la Base)
+
+| Conjunto / predicción | n | MAE | RMSE | MASE | WAPE | pred/real | Pred. (M) | Real (M) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Base / RF | 4.155 | 314.158 | 1.026.148 | 1,2576 | 0,7284 | 0,4914 | 880,7 | 1.792,1 |
+| Base / mezcla | 4.155 | 327.702 | 936.047 | 1,3118 | 0,7598 | 0,9071 | 1.625,5 | 1.792,1 |
+| Ampliada, todos / RF | 6.145 | 266.266 | 909.623 | 1,0658 | 0,7718 | 0,4129 | 875,3 | 2.119,9 |
+| Ampliada, todos / mezcla | 6.145 | 284.569 | 831.264 | 1,1391 | 0,8249 | 0,8792 | 1.863,9 | 2.119,9 |
+| Ampliada, previos / RF | 4.155 | 315.724 | 1.032.982 | 1,2638 | 0,7320 | 0,4817 | 863,3 | 1.792,1 |
+| Ampliada, previos / mezcla | 4.155 | 328.257 | 937.557 | 1,3140 | 0,7611 | 0,9043 | 1.620,7 | 1.792,1 |
+| Ampliada, nuevos / RF | 1.990 | 163.000 | 571.899 | 0,6525 | 0,9894 | 0,0366 | 12,0 | 327,9 |
+| Ampliada, nuevos / mezcla | 1.990 | 193.353 | 546.296 | 0,7740 | 1,1736 | 0,7420 | 243,3 | 327,9 |
+
+### Lectura honesta
+
+- Cobertura y total: la variante cubre 84,5 % de las ventas reales del top 1900 frente a 71,5 % de la Base, y el total predicho por la mezcla pasa de 0,648 a 0,743 de lo que vendieron esos productos. Sigue subestimando.
+- Los productos nuevos no se predicen bien en decisión: F1 macro 0,3299 y accuracy 0,4747, por debajo de la clase mayoritaria (0,6776), y recomiendan Reforzar en 66,3 % frente a 29,6 % real. Al añadirlos, el F1 macro del conjunto baja de 0,4243 a 0,4067.
+- En monto, el RF casi no aporta para los nuevos (razón de sumas 0,0366): el aporte al total viene de `media_3` dentro de la mezcla (razón 0,7420), es decir, es casi la línea base. El MAE y el MASE de los nuevos son menores porque sus ventas son pequeñas; no son comparables con los de la Base (conjuntos distintos).
+- Los productos previos cambian poco (mezcla MAE 328.257 frente a 327.702; F1 macro 0,4335 frente a 0,4243, dentro del ruido de reentrenar con filas adicionales).
+- Limitaciones: seis orígenes, septiembre incompleto, un solo valor de la regla (ventana de 3 meses, base `media_3`); no se probaron otras bases ni umbrales. Nada se decidió con el holdout.
+
+### Conclusión y recomendación
+
+La ampliación sí acerca el total a lo que vendieron los productos principales (de 64,8 % a 74,3 %), pero lo hace con la media de 3 meses, no con el modelo, y sus decisiones para los productos nuevos son peores que la clase mayoritaria. Recomendación: no llevar la decisión ampliada a producción. Si se quiere mejorar el total, la opción defendible es incluir esos productos solo en el monto (mezcla, equivalente a `media_3`) y dejar su decisión como "sin recomendación"; esa decisión de producto queda para el usuario y requeriría su propio estudio (por ejemplo, una clase separada o un umbral distinto para estos productos).
+
 ## [Datos] V6 hasta el 31 de marzo - 2026-10-13
 
 La V6 se había cortado el 27 de marzo de 2026 solo para reflejar la fecha de exportación de la V5, de modo que marzo quedaba incompleto en el entrenamiento. Eso lo hacía parecer más débil, bajaba la base y la media de 3 meses de la mezcla y, en abril de 2026, el dashboard predijo 198,6 M COP frente a 293,4 M reales para los mismos 606 productos. Ahora la V6 llega hasta el 31 de marzo y el holdout empieza el 1 de abril (el periodo sigue siendo los últimos dos años, 2024-01 a 2026-03). Mismos filtros (facturas tipos 1 y 13, no anuladas, sin servicios), misma consulta (`sql/extraccion_ventas_v6.sql`) y mismo extractor, sobre la misma copia de la base; solo cambian `--desde/--hasta`.
