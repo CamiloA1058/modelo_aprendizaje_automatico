@@ -50,17 +50,20 @@ COLOR_INK = "#52514e"
 COLOR_SURFACE = "#fcfcfb"
 
 
-def evaluar_mes(mes, tmp_dir, con_modelo=False):
+def evaluar_mes(mes, tmp_dir, con_modelo=False, dataset=None, sample_weight_fn=None):
     """Entrena con datos < mes, predice mes y devuelve (filas, escala, mayoritaria);
-    con con_modelo=True devuelve ademas el modelo entrenado como cuarto valor."""
+    con con_modelo=True devuelve ademas el modelo entrenado como cuarto valor.
+    dataset (ruta) y sample_weight_fn solo los usan los experimentos; por
+    defecto se entrena con DEFAULT_DATASET y sin pesos."""
     ruta = Path(tmp_dir) / f"entrenamiento_{mes}.csv"
     with open(ruta, "w", encoding="utf-8-sig", newline="") as fh:
-        n = cs.combine_training(DEFAULT_DATASET, HOLDOUT, mes, fh)
+        n = cs.combine_training(dataset or DEFAULT_DATASET, HOLDOUT, mes, fh)
     print(f"\n=== Mes objetivo {mes}: {n:,} filas de entrenamiento ===")
 
     model = SalesForecastModel(
         filepath=ruta, output_path=Path(tmp_dir) / f"pred_{mes}.csv", min_months=6,
     )
+    model.sample_weight_fn = sample_weight_fn
     model.load_and_clean()
     if model._mes_pred.strftime("%Y-%m") != mes:
         raise RuntimeError(f"El modelo predice {model._mes_pred:%Y-%m}, se esperaba {mes}")

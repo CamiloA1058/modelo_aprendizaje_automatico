@@ -1,5 +1,61 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Experimento] Sensibilidad al tramo de baja facturación - 2026-10-13
+
+Experimento sin cambios en el comportamiento de producción: `SalesForecastModel` gana el atributo opcional `sample_weight_fn` (por defecto `None`: no se pasa `sample_weight`, el ajuste es el de siempre); los datos oficiales (`Query_Result_V6.csv`) y el holdout no se tocan. Entre 2024-02 y 2025-04 las facturas de venta caen de ~1.500 a ~450 por mes (la cuenta 4135.06 cae igual) y se recuperan en 2025-05. Pregunta: ¿tratar ese tramo mejora la predicción en meses reales no vistos? Mismo estudio de caso de origen rodante (2026-04 a 2026-09, entrenamiento estrictamente anterior a cada mes), evaluado SIEMPRE contra las ventas reales del holdout. Informe: `outputs/reports/experimento_sensibilidad_gap.txt/.csv`; figura `outputs/figures/experimento_sensibilidad_gap.png`.
+
+Variantes: **Base** (datos oficiales); **V1, datos ajustados (imputación experimental)**: cada producto reescala `VENTAS` y `TOTAL_VENDIDO` de sus filas del tramo por el cociente entre sus ventas medias mensuales de 2025-05 a 2025-10 y las del tramo (meses sin venta cuentan cero), acotado a [1, 5]; con menos de 3 meses con ventas en una ventana se usa el factor global; `PRECIO_PROMEDIO` y `FRECUENCIA` no se modifican; no se crean filas; el CSV ajustado solo existió en un directorio temporal; **V2**, sin datos nuevos: peso de muestra 0,3 (y 0 = excluir) a las filas cuyo mes actual o mes objetivo cae en el tramo.
+
+Factores de V1: 3.574 productos (806 con factor propio, 2.768 con el global); factor global 5,000 (tope); mediana 5,000, mínimo 1,000, máximo 5,000 (el tope se alcanza en la mayoría); 49,5 % de las filas cae en el tramo y 48,8 % se reescala; monto del tramo 1.224,7 M -> 5.277,4 M COP (81,6 -> 351,8 M/mes; referencia 2025-05 a 2025-10: 472,1 M/mes).
+
+### Resultados agrupados (6 meses; MASE con la escala de la Base)
+
+| Variante | F1 macro | Acc. balanceada | Accuracy | % Reforzar pred. / real |
+|---|---:|---:|---:|---:|
+| Base (datos oficiales) | 0,4243 | 0,4575 | 0,5682 | 54,2 / 29,2 |
+| V1: datos ajustados (imputación experimental) | 0,4539 | 0,4742 | 0,6105 | 46,7 / 29,2 |
+| V2: peso 0,3 al tramo | 0,4284 | 0,4610 | 0,5746 | 53,3 / 29,2 |
+| V2: tramo excluido (peso 0) | 0,4325 | 0,4595 | 0,5816 | 50,9 / 29,2 |
+| Clase mayoritaria | 0,2624 | | 0,6489 | |
+
+| Variante / predicción | MAE | RMSE | MASE | WAPE | pred/real |
+|---|---:|---:|---:|---:|---:|
+| Base / RF solo | 314.158 | 1.026.148 | 1,2576 | 0,7284 | 0,4914 |
+| Base / mezcla | 327.702 | 936.047 | 1,3118 | 0,7598 | 0,9071 |
+| V1 / RF solo | 329.614 | 1.062.892 | 1,3198 | 0,7516 | 0,3449 |
+| V1 / mezcla | 333.687 | 945.854 | 1,3361 | 0,7609 | 0,8752 |
+| V2 peso 0,3 / RF solo | 317.659 | 1.023.804 | 1,2716 | 0,7365 | 0,5173 |
+| V2 peso 0,3 / mezcla | 329.134 | 937.464 | 1,3175 | 0,7631 | 0,9153 |
+| V2 peso 0 / RF solo | 324.655 | 1.025.029 | 1,2996 | 0,7527 | 0,5651 |
+| V2 peso 0 / mezcla | 329.855 | 938.818 | 1,3204 | 0,7648 | 0,9243 |
+
+En abril de 2026 el sistema recomienda Reforzar para 66,7 % de los productos (Base) frente a 32,4 % real; V1 52,7 %, V2 0,3 65,3 %, V2 0 62,4 %.
+
+### Sumas mensuales en millones de COP (productos con predicción de monto)
+
+| Mes | Real | Base RF | Base mezcla | V1 RF | V1 mezcla | V2 0,3 RF | V2 0,3 mezcla | V2 0 RF | V2 0 mezcla |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-04 | 302,4 | 163,4 | 247,0 | 89,7 | 217,5 | 177,5 | 252,7 | 200,1 | 251,4 |
+| 2026-05 | 356,5 | 151,7 | 269,2 | 105,1 | 255,1 | 164,1 | 272,9 | 197,3 | 282,9 |
+| 2026-06 | 230,5 | 184,7 | 327,6 | 107,1 | 312,0 | 190,3 | 328,7 | 206,1 | 331,9 |
+| 2026-07 | 277,6 | 127,9 | 259,4 | 105,6 | 273,5 | 136,7 | 262,0 | 141,8 | 263,6 |
+| 2026-08 | 323,8 | 132,5 | 266,0 | 107,5 | 258,4 | 142,7 | 269,1 | 148,7 | 270,8 |
+| 2026-09 | 301,4 | 120,6 | 256,3 | 102,7 | 250,9 | 115,8 | 254,9 | 118,8 | 255,8 |
+| Agrupado | 1.792,1 | 880,7 | 1.625,5 | 617,8 | 1.567,5 | 927,0 | 1.640,3 | 1.012,8 | 1.656,4 |
+
+### Etiquetas de entrenamiento en los límites del tramo (modelo de 2026-04; [Reducir, Mantener, Reforzar])
+
+| Variante | 2024-01 -> 2024-02 (caída) | 2025-04 -> 2025-05 (recuperación) |
+|---|---|---|
+| Base, V2 0,3 y V2 0 (mismas etiquetas) | [660, 15, 51] | [469, 36, 287] |
+| V1: datos ajustados (imputación experimental) | [527, 28, 171] | [651, 25, 116] |
+
+Mecanismo: con los datos oficiales la recuperación de mayo de 2025 aparece como 287 "Reforzar" de 792 filas y la caída de febrero de 2024 como 660 "Reducir"; V1 aplana ambos saltos (116 "Reforzar" en la recuperación).
+
+### Conclusión
+
+Con datos reales de seis meses, ninguna variante mejora de forma consistente. V1 sube el F1 macro agrupado (0,4243 -> 0,4539) y la accuracy balanceada (0,4575 -> 0,4742) y baja el porcentaje de Reforzar (54,2 % -> 46,7 %, aún lejos del 29,2 % real), pero el efecto no es uniforme (en 2026-05 el F1 macro baja de 0,4487 a 0,4267) y empeora los montos: MAE del RF 314.158 -> 329.614, razón de suma del RF 0,4914 -> 0,3449 y mezcla 0,9071 -> 0,8752. V2 casi no cambia la clasificación (F1 macro +0,004 con peso 0,3, +0,008 con peso 0) y deja los montos igual o algo peores. Ninguna variante supera a la clase mayoritaria en accuracy (0,6489). Limitaciones: seis meses de un solo holdout, la ganancia de V1 es de unos 0,03 de F1 macro sin intervalo de confianza, el tope ×5 se satura en la mayoría de los productos y no se sabe si la caída es una caída real de ventas o ventas fuera del sistema. Recomendación: mantener los datos oficiales. Si se quisiera explorar V1, sería solo como recomendación para la decisión de reposición (no para los montos) y tras confirmar con el taller el origen de la caída; no se adopta ni se reporta como resultado del sistema.
+
 ## [Sistema] Predicción combinada en el dashboard - 2026-10-13
 
 **Qué cambia.** La predicción de ventas en pesos del sistema pasa a ser la mezcla `w x RF + (1 - w) x media_3` (opción 3b del experimento "[Experimento] Mejoras de la predicción en pesos"), donde `media_3` es el promedio de los últimos tres meses del producto (`media_3_actual`, con respaldo a las ventas del mes actual si falta) y `w` toma valores de 0, 0,1 ... 1.
