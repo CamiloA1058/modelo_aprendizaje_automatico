@@ -158,6 +158,10 @@ class SalesForecastModel:
         self.min_months      = min_months
         self.clf_params      = {**DEFAULT_CLF_PARAMS, **(clf_params or {})}
         self.bulk_adjustment_min_products = bulk_adjustment_min_products
+        # Opcional (solo experimentos): funcion que recibe los meses actuales
+        # (fecha) de las filas de entrenamiento y devuelve sus pesos de
+        # muestra. None = sin pesos (comportamiento de produccion).
+        self.sample_weight_fn = None
 
         # Estado interno
         self.df           = None   # historial completo
@@ -567,6 +571,13 @@ class SalesForecastModel:
         if excluidos > 0:
             print(f"    (excluidos {excluidos} por historial insuficiente)")
 
+    def _fit_kwargs(self, rows):
+        """sample_weight para fit() si hay sample_weight_fn; vacio si no."""
+        if self.sample_weight_fn is None:
+            return {}
+        return {"sample_weight": np.asarray(
+            self.sample_weight_fn(rows["fecha"].to_numpy()), float)}
+
     # ── 5. CLASIFICADOR ───────────────────────────────────────────────────────
     def train_classifier(self):
         X_tr = self._X_scaled[self._train_idx]
@@ -578,7 +589,7 @@ class SalesForecastModel:
             **self.clf_params,
             class_weight="balanced", random_state=42, n_jobs=-1,
         )
-        self.clf.fit(X_tr, y_tr)
+        self.clf.fit(X_tr, y_tr, **self._fit_kwargs(self._df_train.iloc[self._train_idx]))
 
         pred = self.clf.predict(X_te)
 
@@ -791,7 +802,8 @@ class SalesForecastModel:
         self.reg = RandomForestRegressor(
             n_estimators=200, max_depth=12, random_state=42, n_jobs=-1,
         )
-        self.reg.fit(self.scaler.transform(X_reg_train), y_reg_train)
+        self.reg.fit(self.scaler.transform(X_reg_train), y_reg_train,
+                     **self._fit_kwargs(df_reg_train))
 
         # ── Evaluación (solo filas de prueba) ────────────────────────────────
         X_reg_test = self._X.loc[df_reg_test.index]
