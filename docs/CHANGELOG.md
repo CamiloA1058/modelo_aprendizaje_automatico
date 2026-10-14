@@ -1,5 +1,37 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Sistema] Predicción combinada en el dashboard - 2026-10-13
+
+**Qué cambia.** La predicción de ventas en pesos del sistema pasa a ser la mezcla `w x RF + (1 - w) x media_3` (opción 3b del experimento "[Experimento] Mejoras de la predicción en pesos"), donde `media_3` es el promedio de los últimos tres meses del producto (`media_3_actual`, con respaldo a las ventas del mes actual si falta) y `w` toma valores de 0, 0,1 ... 1.
+
+**Por qué.** El regresor en `log1p` subestima el total en pesos (en la prueba interna predice 0,63 de la suma real); en el estudio de caso fuera de muestra la mezcla subió la razón suma predicha/real de 0,49 a 0,91 con un aumento de MAE de 4,3 % (314.158 -> 327.702).
+
+**Cómo se elige w.** Solo con la partición de prueba interna del regresor dentro del entrenamiento (`train_regressor`), minimizando |suma predicha - suma real|; no se usa ningún mes objetivo ni holdout. Clasificador, k, hiperparámetros, umbrales y valores por defecto no cambian.
+
+**Cambios en el código.**
+- `SalesForecastModel`: nuevos `blend_weight`, `blend_metrics` (MAE, MSE, RMSE, R², MASE, razón de sumas, w) y `reg_test_media_3`; `reg_metrics` recibe además `sum_ratio`. `predict_next_month` entrega `ventas_predichas` (mezcla) y `ventas_predichas_rf` (RF puro); los productos sin predicción de monto siguen sin ella.
+- Dashboard: `/api/summary` devuelve `pred_total` (mezcla), `pred_total_rf` y `blend_weight`; el KPI "Ventas predichas" muestra la mezcla y la nota "Combinación del modelo (w %) y el promedio de los últimos 3 meses"; la leyenda del historial dice "Predicción próximo mes (modelo combinado)"; el detalle del producto muestra "Solo modelo: $..."; `/api/products` y el CSV descargable incluyen ambas columnas.
+- `scripts/evaluate_model.py` agrega la sección "Mezcla (modelo + media de 3 meses)" junto a la fila del RF; `scripts/estudio_caso.py` reporta "modelo" (RF) y "mezcla"; `scripts/experimento_mejoras.py` usa `ventas_predichas_rf` como base (sus números no cambian).
+- Pruebas: `tests/test_blend_model.py` y `tests/test_dashboard_blend.py`; suite completa 142 pruebas OK.
+
+### Corrida real (V6 sin servicios, `scripts/entrenar.py` + `scripts/evaluate_model.py`, prueba interna n = 4.472, top 1900 productos)
+
+w elegido: **0,5**.
+
+| Métrica | RF | Mezcla | Media_3 |
+|---|---:|---:|---:|
+| MAE (COP) | 227.468 | 252.409 | 310.225 |
+| RMSE (COP) | 896.837 | 841.440 | 915.553 |
+| R² | 0,3724 | 0,4475 | 0,3459 |
+| MASE | 1,0164 | 1,1278 | 1,3862 |
+| Razón de sumas pred/real | 0,6266 | 0,9950 | 1,3634 |
+
+La mezcla reduce RMSE y sube R² frente al RF, a cambio de un MAE 11,0 % mayor, y deja la suma predicha casi igual a la real en la prueba. Estudio de caso fuera de muestra (agrupado, 6 meses): modelo MAE 314.158 / razón 0,4914; mezcla MAE 327.702 / razón 0,9071 (w por mes entre 0,2 y 0,4).
+
+### Prueba de humo del dashboard (corrida real, abril 2026)
+
+`/api/run` con los valores por defecto sobre `Query_Result_V6.csv`: 654 productos predichos, 606 con monto. `pred_total` = 198.601.648 COP (mezcla), `pred_total_rf` = 129.816.494 COP, `blend_weight` = 0,5. Producto 1888: `ventas_predichas` 18.571 COP, `ventas_predichas_rf` 11.908 COP.
+
 ## [Experimento] Mejoras de la predicción en pesos - 2026-10-13
 
 Experimento sin cambios en el modelo de producción (`model.py`, dashboard y `entrenar.py` intactos). Mide en el estudio de caso fuera de muestra (mismos meses 2026-04 a 2026-09, mismas filas y valores reales; `scripts/experimento_mejoras.py`, ayudantes puros en `src/ventas_forecast/improvements.py`, 15 pruebas nuevas) si cuatro opciones acercan la predicción en pesos a la realidad, sobre todo la suma mensual. La base reproduce `estudio_caso.csv` (MAE agrupado 314.158). El clasificador no cambia. **Nada se ajustó ni se eligió con el mes objetivo (holdout)**: los hiperparámetros de la opción 2 son fijos (HistGB Poisson: 300 iteraciones, tasa 0,05, 31 hojas, mínimo 20 por hoja; RF sin log: 200 árboles, profundidad 12) y el peso w de la opción 3 y el cuantil conformal de la opción 4 salen de la partición de prueba interna del entrenamiento de cada mes.

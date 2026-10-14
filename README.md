@@ -149,6 +149,8 @@ Los resultados se guardan en `outputs/` (gitignored):
 
 Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen general (KPIs, historial, distribución de decisiones, top de productos), catálogo de predicciones con búsqueda, filtros y descarga del CSV, detalle por producto y ejecución del modelo con subida de CSV y parámetros.
 
+**Predicción combinada.** El monto predicho por producto (`ventas_predichas`) es `w x RF + (1 - w) x media_3`, donde `media_3` es el promedio de los últimos 3 meses del producto y `w` (0, 0,1 ... 1) se elige solo con la partición de prueba interna del regresor, minimizando |suma predicha - suma real|. El RF puro se conserva en `ventas_predichas_rf`. El KPI "Ventas predichas" muestra la suma de la mezcla (con `w` en porcentaje), el detalle del producto agrega "Solo modelo: $..." y el CSV descargable trae ambas columnas. En la última corrida real `w` = 0,5; en la prueba interna la razón suma predicha/real pasó de 0,63 (RF) a 0,99 (mezcla) con MAE 227.468 -> 252.409 COP (ver `outputs/reports/evaluacion_modelo.txt` y la entrada "[Sistema] Predicción combinada en el dashboard" de `docs/CHANGELOG.md`).
+
 ```
 Navegador (dashboard/dashboard.html)
         │  HTTP / JSON
@@ -156,7 +158,7 @@ Navegador (dashboard/dashboard.html)
   dashboard/app.py (Flask, puerto 5000)
         ├── GET  /api/status        Estado del pipeline + mes predicho
         ├── POST /api/run           Lanza el modelo en un hilo secundario
-        ├── GET  /api/summary       KPIs, historial, métricas, top productos
+        ├── GET  /api/summary       KPIs, pred_total (mezcla), pred_total_rf, blend_weight, historial, métricas, top productos
         ├── GET  /api/products      Lista paginada con filtros y orden
         ├── GET  /api/product/<id>  Historial + predicción de un producto
         └── GET  /api/download      Descarga PREDICCION_MENSUAL.csv

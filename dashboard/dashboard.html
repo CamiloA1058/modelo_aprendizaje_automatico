@@ -579,7 +579,7 @@ async function loadSummary() {
   document.getElementById('kpi-reducir-pct').textContent  = pctRed + '% del total analizado';
   document.getElementById('kpi-variacion').textContent =
     (d.blend_weight != null
-      ? `Combinación del modelo (${Math.round(d.blend_weight * 100)} %) y el promedio de los últimos 3 meses`
+      ? `Combinación del modelo (${Math.round(d.blend_weight * 100)}%) y el promedio de los últimos 3 meses`
       : 'Combinación del modelo y el promedio de los últimos 3 meses') +
     ` · ${fmt(d.con_pred)} productos`;
 
