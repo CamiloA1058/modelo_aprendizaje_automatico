@@ -1,5 +1,66 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Datos] V6 hasta el 31 de marzo - 2026-10-13
+
+La V6 se había cortado el 27 de marzo de 2026 solo para reflejar la fecha de exportación de la V5, de modo que marzo quedaba incompleto en el entrenamiento. Eso lo hacía parecer más débil, bajaba la base y la media de 3 meses de la mezcla y, en abril de 2026, el dashboard predijo 198,6 M COP frente a 293,4 M reales para los mismos 606 productos. Ahora la V6 llega hasta el 31 de marzo y el holdout empieza el 1 de abril (el periodo sigue siendo los últimos dos años, 2024-01 a 2026-03). Mismos filtros (facturas tipos 1 y 13, no anuladas, sin servicios), misma consulta (`sql/extraccion_ventas_v6.sql`) y mismo extractor, sobre la misma copia de la base; solo cambian `--desde/--hasta`.
+
+Verificación de la extracción: ningún día aparece en ambos archivos y la unión (V6 + holdout) es idéntica fila a fila a la anterior (61.374 filas), es decir, solo se movieron al entrenamiento las filas del 28 al 31 de marzo.
+
+### Dataset
+
+| | Antes (hasta 27/03) | Después (hasta 31/03) |
+|---|---:|---:|
+| V6: filas (producto-día) | 47.749 | 48.028 |
+| V6: productos | 3.573 | 3.584 |
+| V6: monto (COP) | 6.344.817.681 | 6.445.554.996 |
+| V6: rango | 2024-01-09 a 2026-03-27 | 2024-01-09 a 2026-03-31 |
+| Ventas de marzo de 2026 en el entrenamiento (COP) | 315.329.441 | 416.066.756 |
+| Holdout: filas | 13.625 | 13.346 |
+| Holdout: productos | 2.462 | 2.439 |
+| Holdout: monto (COP) | 2.861.381.559 | 2.760.644.244 |
+| Holdout: rango | 2026-03-28 a 2026-09-22 | 2026-04-01 a 2026-09-22 |
+
+### Métricas de la prueba interna (n = 6.242 en el clasificador; n = 4.472 en el regresor)
+
+| Clasificador | Antes | Después |
+|---|---:|---:|
+| F1 macro | 0,4467 | 0,4501 |
+| Accuracy balanceada | 0,5030 | 0,5043 |
+| % Reforzar real | 16,63 % | 16,98 % |
+| % Reforzar predicho | 28,15 % | 28,15 % |
+
+| Regresor | RF antes | RF después | Mezcla antes | Mezcla después |
+|---|---:|---:|---:|---:|
+| MAE | 227.468 | 232.349 | 252.409 | 266.174 |
+| RMSE | 896.837 | 907.724 | 841.440 | 860.530 |
+| R² | 0,3724 | 0,4213 | 0,4475 | 0,4799 |
+| MASE | 1,0164 | 1,0382 | 1,1278 | 1,1893 |
+| Razón de sumas (pred./real) | 0,6266 | 0,5937 | 0,9950 | 1,0126 |
+| Peso w | | | 0,5 | 0,4 |
+
+k = 3 sigue siendo el mejor por silueta (0,3919; k = 2: 0,3607, k = 4: 0,3445). El ajuste de hiperparámetros vuelve a proponer `max_depth` sin límite, con F1 macro de prueba 0,4502 frente a 0,4501 de los valores por defecto: diferencia sin relevancia, así que `DEFAULT_CLF_PARAMS` no cambia (decisión pendiente del usuario).
+
+### Estudio de caso (agrupado, abril a septiembre de 2026)
+
+No cambia: cada mes se entrena con la V6 más el holdout anterior a ese mes, y la unión de datos es la misma, por lo que `estudio_caso.txt`, `estudio_caso.csv` y el experimento de sensibilidad dan los mismos números (F1 macro agrupado 0,4243; MAE modelo 314.158 y mezcla 327.702; razón de sumas 0,4914 y 0,9071). Lo mismo vale para `experimento_mejoras.txt`.
+
+### Comparación de abril de 2026 en el dashboard (`scripts/entrenar.py`)
+
+| | Antes | Después |
+|---|---:|---:|
+| Productos con predicción de monto | 606 | 645 |
+| Suma `ventas_predichas` (mezcla) | 198,6 M | 247,0 M |
+| Suma `ventas_predichas_rf` | 129,8 M | 163,4 M |
+| Peso w | 0,5 | 0,4 |
+| Ventas reales de abril de esos mismos productos | 293,4 M | 302,4 M |
+| Mezcla / real | 0,677 | 0,817 |
+| Ventas reales de abril, top 1900 | 416,0 M | 416,0 M |
+| Ventas reales de abril, todo el taller | 452,9 M | 452,9 M |
+| Productos con predicción (total) | 654 | 697 |
+| % Reforzar en la predicción de abril | 69,0 % | 66,7 % |
+
+Se reejecutaron `eda.py`, `select_k.py`, `tune_rf.py`, `evaluate_model.py`, `compare_models.py`, `estudio_caso.py`, `experimento_mejoras.py`, `experimento_sensibilidad_gap.py` y `entrenar.py`. En `eda_resumen.txt` marzo de 2026 ya figura como mes completo (promedio de marzo en el resumen estacional del EDA: 151,7 M a 185,3 M). En `comparacion_modelos.txt` el F1 macro del clasificador pasa de 0,4467 a 0,4501.
+
 ## [Experimento] Sensibilidad al tramo de baja facturación - 2026-10-13
 
 Experimento sin cambios en el comportamiento de producción: `SalesForecastModel` gana el atributo opcional `sample_weight_fn` (por defecto `None`: no se pasa `sample_weight`, el ajuste es el de siempre); los datos oficiales (`Query_Result_V6.csv`) y el holdout no se tocan. Entre 2024-02 y 2025-04 las facturas de venta caen de ~1.500 a ~450 por mes (la cuenta 4135.06 cae igual) y se recuperan en 2025-05. Pregunta: ¿tratar ese tramo mejora la predicción en meses reales no vistos? Mismo estudio de caso de origen rodante (2026-04 a 2026-09, entrenamiento estrictamente anterior a cada mes), evaluado SIEMPRE contra las ventas reales del holdout. Informe: `outputs/reports/experimento_sensibilidad_gap.txt/.csv`; figura `outputs/figures/experimento_sensibilidad_gap.png`.
