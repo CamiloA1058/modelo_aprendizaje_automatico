@@ -132,7 +132,7 @@ class ProbVentaApiTest(unittest.TestCase):
 
     def test_pagina_ofrece_columna_kpi_y_filtro(self):
         html = self.client.get("/").get_data(as_text=True)
-        for texto in ("Probablemente se venderán", "Prob. de venta",
+        for texto in ("Probablemente se venderán", "Probabilidad de venta",
                       "Se venderá: Sí", "No se venderá", 'id="filter-venta"'):
             self.assertIn(texto, html)
 

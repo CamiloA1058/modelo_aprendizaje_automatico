@@ -74,8 +74,9 @@
   td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   tr:last-child td { border-bottom: none; }
   tbody tr:hover td { background: var(--bg); cursor: pointer; }
+  #page-productos td, #page-productos th { padding-left: 8px; padding-right: 8px; }
   .codigo { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
-  .desc { font-weight: 500; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .desc { font-weight: 500; max-width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* PROB BAR */
   .prob-wrap { display: flex; align-items: center; gap: 8px; }
@@ -288,7 +289,7 @@
             <thead><tr>
               <th>Código</th><th>Descripción</th>
               <th>Ventas base</th><th>Predicción</th>
-              <th>Prob. reducción</th><th>Decisión</th><th>Prob. de venta</th><th>Se venderá</th>
+              <th>Prob. reducción</th><th>Decisión</th><th>Prob. venta</th><th>Se venderá</th>
             </tr></thead>
             <tbody id="top-risk-body"></tbody>
           </table>
@@ -302,7 +303,7 @@
             <thead><tr>
               <th>Código</th><th>Descripción</th>
               <th>Ventas base</th><th>Predicción</th>
-              <th>Prob. crecimiento</th><th>Decisión</th><th>Prob. de venta</th><th>Se venderá</th>
+              <th>Prob. crecimiento</th><th>Decisión</th><th>Prob. venta</th><th>Se venderá</th>
             </tr></thead>
             <tbody id="top-growth-body"></tbody>
           </table>
@@ -354,7 +355,7 @@
             <th>Predicción <small id="th-mes" style="font-size:9px;font-weight:400"></small></th>
             <th>Variación</th>
             <th>Prob. crecimiento</th>
-            <th>Prob. de venta</th><th>Se venderá</th>
+            <th title="Probabilidad de venta">Prob. de venta</th><th>Se venderá</th>
             <th>Decisión</th><th>Seg.</th>
           </tr></thead>
           <tbody id="products-body">
@@ -729,7 +730,7 @@ function renderTopRisk(rows) {
       </td>
       <td>${decisionBadge(r.decision)}</td>
       <td>${probVentaHtml(r)}</td>
-      <td>${ventaBadge(r.se_vendera)}</td>
+      <td>${ventaBadge(r.se_vendera, true)}</td>
     </tr>`).join('');
 }
 
@@ -748,21 +749,18 @@ function renderTopGrowth(rows) {
       </td>
       <td>${decisionBadge(r.decision)}</td>
       <td>${probVentaHtml(r)}</td>
-      <td>${ventaBadge(r.se_vendera)}</td>
+      <td>${ventaBadge(r.se_vendera, true)}</td>
     </tr>`).join('');
 }
 
 function probVentaHtml(r) {
   if (r.prob_venta == null || r.se_vendera == null) return '<span style="color:var(--muted)">—</span>';
-  return `<div class="prob-wrap">
-          <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_venta*100)}%;background:var(--accent)"></div></div>
-          <span class="prob-val">${Math.round(r.prob_venta*100)}%</span>
-        </div>`;
+  return `<span class="prob-val" style="font-weight:600">${Math.round(r.prob_venta*100)}%</span>`;
 }
 
-function ventaBadge(v) {
-  if (v === 'Sí') return '<span class="badge green">Se venderá: Sí</span>';
-  if (v === 'No') return '<span class="badge gray">Se venderá: No</span>';
+function ventaBadge(v, corto) {
+  if (v === 'Sí') return `<span class="badge green">${corto ? 'Sí' : 'Se venderá: Sí'}</span>`;
+  if (v === 'No') return `<span class="badge gray">${corto ? 'No' : 'Se venderá: No'}</span>`;
   return '<span style="color:var(--muted)">—</span>';
 }
 
@@ -829,7 +827,7 @@ async function loadProducts() {
         </div>`}
       </td>
       <td>${probVentaHtml(r)}</td>
-      <td>${ventaBadge(r.se_vendera)}</td>
+      <td>${ventaBadge(r.se_vendera, true)}</td>
       <td>${decisionBadge(r.decision)}</td>
       <td><span class="badge gray">${r.cluster}</span></td>
     </tr>`;
