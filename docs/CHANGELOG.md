@@ -1,3 +1,19 @@
+## [Sistema] Stock sugerido por producto - 2026-10-14
+
+Resultado del experimento "[Experimento] Stock sugerido con nivel de servicio 70 %" (cobertura agrupada 68,4 %, 4 de 6 meses dentro de 65-75 %).
+
+**Regla.** Paso nuevo `SalesForecastModel.agregar_stock_sugerido()`, posterior a `agregar_probabilidad_venta()` y activo por defecto (`stock_sugerido=True`, `nivel_servicio=0.70`; `run()`, `scripts/entrenar.py` y el dashboard lo ejecutan, y el formulario acepta `stock_sugerido` y `nivel_servicio`). Escribe `stock_sugerido` (COP) y `stock_sugerido_unidades` (techo del stock entre el último precio promedio conocido) para los productos con monto predicho; cota = max(expm1(log1p(pred) + q70), 0), con q70 el cuantil 70 % de log1p(real) - log1p(pred) en la validación interna del entrenamiento, por cubeta de `prob_venta` (cubetas con menos de 50 filas se fusionan; sin probabilidad, cuantil global). No cambia decisiones, montos, totales, `prob_venta` ni grupos; con `stock_sugerido=False` la salida es la de antes (probado).
+
+- Dashboard: columna "Stock sugerido (70 %)" (COP y unidades) en Productos y en las tablas del resumen, bloque en el detalle del producto, suma por grupo en la vista Grupos, orden `sort=stock`, nota explicativa. `/api/products`, `/api/product`, `/api/summary` (tops), `/api/grupos` y el CSV traen los campos (null si el producto no tiene monto).
+- Excel `prediccion_vs_real.xlsx`: columnas "Stock sugerido (70 %)", "Stock sugerido (unidades)", "Unidades reales" y "¿Cubrió la demanda?" por producto; el Resumen trae cobertura mensual (todos, los que vendieron y unidades) y la agrupada; "Cómo leer" lo explica. Coincide con el experimento: 63,1 / 65,4 / 74,9 / 69,1 / 64,3 / 73,1 %, agrupado 68,4 %.
+- Pruebas: `tests/test_stock_sugerido.py` (29), `tests/test_stock_sugerido_modelo.py` (11), `tests/test_dashboard_stock.py` (12), `tests/test_prediccion_vs_real_stock.py` (10); suite de 382 pruebas.
+
+**Corrida real (V6, mes 2026-04).** 993 productos con stock sugerido; cuantiles q70 por cubeta de `prob_venta`: [0-0,4) -8,79 (n=389), [0,4-0,6) -0,92 (n=1.441), [0,6-0,8) +0,39 (n=1.694), [0,8-1] +0,39 (n=1.620). `/api/summary` sin cambios (697, 465 / 10 / 222, 307.634.392 COP).
+
+**Limitación.** Es un nivel de abastecimiento, no un acierto del monto: entre los productos que sí vendieron la cobertura es 47,3 %, y el stock total es 1,28 veces lo vendido.
+
+---
+
 ## [Experimento] Stock sugerido con nivel de servicio 70 % - 2026-10-14
 
 Objetivo del usuario: predicciones mensuales por producto confiables "alrededor del 70 %" para decidir compras. El monto puntual por producto no llega (mejor acierto medio 38 %, ver "[Experimento] Acierto del monto por producto"), así que se mide otra cosa, la que usa la teoría de inventarios: un nivel "order-up-to" X al nivel de servicio 70 % ("si abastece hasta X, la demanda del mes queda cubierta en 7 de cada 10 casos").
