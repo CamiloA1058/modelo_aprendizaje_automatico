@@ -126,6 +126,7 @@ PYTHONIOENCODING=utf-8 python scripts/tune_rf.py         # Hiperparámetros
 PYTHONIOENCODING=utf-8 python scripts/evaluate_model.py  # Evaluación
 PYTHONIOENCODING=utf-8 python scripts/compare_models.py  # Comparación de modelos
 PYTHONIOENCODING=utf-8 python scripts/eda.py             # EDA
+PYTHONIOENCODING=utf-8 python scripts/reporte_prediccion_vs_real.py  # Excel predicción vs real por producto (requiere openpyxl)
 ```
 
 ### Pruebas
@@ -151,6 +152,8 @@ Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen
 
 **Predicción combinada.** El monto predicho por producto (`ventas_predichas`) es `w x RF + (1 - w) x media_3`, donde `media_3` es el promedio de los últimos 3 meses del producto y `w` (0, 0,1 ... 1) se elige solo con la partición de prueba interna del regresor, minimizando |suma predicha - suma real|. El RF puro se conserva en `ventas_predichas_rf`. El KPI "Ventas predichas" muestra la suma de la mezcla (con `w` en porcentaje), el detalle del producto agrega "Solo modelo: $..." y el CSV descargable trae ambas columnas. En la última corrida real `w` = 0,5; en la prueba interna la razón suma predicha/real pasó de 0,63 (RF) a 0,99 (mezcla) con MAE 227.468 -> 252.409 COP (ver `outputs/reports/evaluacion_modelo.txt` y la entrada "[Sistema] Predicción combinada en el dashboard" de `docs/CHANGELOG.md`).
 
+**Estimación por promedio.** Los productos que no vendieron en el último mes pero sí en alguno de los 2 meses anteriores (con al menos `min_months` meses con ventas y dentro de los 1.900 con más ventas) aparecen aparte: su monto es el promedio de los últimos 3 meses (`media_3`), no una predicción del modelo, y su decisión es "Sin recomendación (estimación por promedio)", porque el clasificador es peor que la clase mayoritaria en ellos. Se calculan en `SalesForecastModel.estimar_por_promedio()` (activo por defecto, `estimacion_por_promedio=False` lo desactiva) y el CSV trae la columna `origen_estimacion` ("modelo" / "promedio"). El KPI "Ventas predichas" suma ambos grupos y detalla cada uno; Reforzar/Mantener/Reducir y la dona cuentan solo los productos del modelo, y un KPI aparte muestra cuántos productos quedan sin recomendación. El catálogo tiene el filtro "Sin recomendación (estimación por promedio)". En abril de 2026 (V6): 697 productos con decisión, 348 por promedio, 247,0 M + 60,6 M = 307,6 M (entrada "[Sistema] Estimación por promedio..." de `docs/CHANGELOG.md`).
+
 ```
 Navegador (dashboard/dashboard.html)
         │  HTTP / JSON
@@ -158,7 +161,7 @@ Navegador (dashboard/dashboard.html)
   dashboard/app.py (Flask, puerto 5000)
         ├── GET  /api/status        Estado del pipeline + mes predicho
         ├── POST /api/run           Lanza el modelo en un hilo secundario
-        ├── GET  /api/summary       KPIs, pred_total (mezcla), pred_total_rf, blend_weight, historial, métricas, top productos
+        ├── GET  /api/summary       KPIs, pred_total (modelo + promedio), pred_total_modelo, pred_total_promedio, n_promedio, pred_total_rf, blend_weight, historial, métricas, top productos
         ├── GET  /api/products      Lista paginada con filtros y orden
         ├── GET  /api/product/<id>  Historial + predicción de un producto
         └── GET  /api/download      Descarga PREDICCION_MENSUAL.csv

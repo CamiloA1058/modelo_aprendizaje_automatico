@@ -1,5 +1,24 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Sistema] Estimación por promedio para productos sin venta el último mes - 2026-10-13
+
+Decisión del usuario tras el experimento "Elegibilidad ampliada": el clasificador es peor que la clase mayoritaria en esos productos (exactitud 0,4747 frente a 0,6776, Reforzar predicho 66,3 % frente a 29,6 % real), así que NO reciben decisión del modelo; pero su monto sí se estima, porque el promedio de 3 meses cubre mejor el total.
+
+**Regla.** Paso nuevo `SalesForecastModel.estimar_por_promedio()`, posterior a `predict_next_month()` y activo por defecto (`estimacion_por_promedio=True`; `run()`, `scripts/entrenar.py` y el dashboard lo ejecutan). Un producto entra si cumple a la vez: sin ventas en el último mes, `media_3_actual > 0` (media de los últimos 3 meses incluido el último mes en cero, es decir, vendió en alguno de los 2 meses anteriores), al menos `min_months` meses con ventas y pertenencia a los `top_n_products` del regresor (como el monto de los demás). Su `ventas_predichas` es `media_3`; `ventas_predichas_rf`, `prob_crecimiento` y `prob_reduccion` quedan vacías y su decisión es "Sin recomendación (estimación por promedio)".
+
+- El entrenamiento del clasificador y del regresor no cambia: no se agregan sus filas y no se usa `elegibilidad_ampliada` (sigue en `False`). Con `estimacion_por_promedio=False` el resultado y el CSV son los de antes (probado).
+- Resultados y CSV: columna nueva `origen_estimacion` ("modelo" / "promedio"); sin el paso la columna no existe y el dashboard trata todo como "modelo".
+- Dashboard: `/api/summary` devuelve `pred_total` = total del modelo + total por promedio, más `pred_total_modelo`, `pred_total_promedio`, `n_promedio` y `con_pred_modelo` (se mantienen `pred_total_rf` y `blend_weight`). `total`, Reforzar/Mantener/Reducir, la dona, el promedio de probabilidad y las tablas de probabilidad cuentan solo los productos del modelo; un KPI nuevo muestra "Sin recomendación: M productos". El KPI "Ventas predichas" muestra el total y la nota "Modelo combinado: $X (N productos) · Estimación por promedio: $Y (M productos)". El historial cubre los mismos productos que el total (modelo con monto + promedio). El catálogo tiene el filtro "Sin recomendación (estimación por promedio)"; el detalle de esos productos dice "Estimación por promedio de los últimos 3 meses" y no muestra probabilidad.
+- Pruebas: `tests/test_estimacion_promedio.py` (10) y `tests/test_dashboard_promedio.py` (9); suite de 193 pruebas (202 con la lista de predicción contra realidad).
+
+**Corrida real (V6, mes 2026-04).** 697 productos con decisión (645 con monto) y 348 por promedio; modelo 247,0 M + promedio 60,6 M = 307,6 M. Las decisiones son las de siempre (465 Reforzar, 10 Mantener, 222 Reducir). Frente a las ventas reales de abril: productos del modelo con monto 302,4 M, productos por promedio 60,8 M, los 1.900 con más ventas 416,0 M; la cobertura del real de los 1.900 pasa de 0,594 (solo modelo, 247,0 / 416,0) a 0,740 (307,6 / 416,0) y la razón predicho / real de los mismos productos es 0,847 (307,6 / 363,2). El total del modelo no cambia.
+
+### Lista de predicción contra realidad por producto
+
+`scripts/reporte_prediccion_vs_real.py` (necesita `openpyxl`, en `requirements-comparacion.txt`) genera `outputs/reports/prediccion_vs_real.xlsx` y `prediccion_vs_real_abril.csv` (`;`, UTF-8 con BOM). Hojas: "Cómo leer", "Resumen" (totales por mes, cobertura, % de decisiones acertadas y MAE), "Abril 2026" (el mes que predice el dashboard, entrenado como `entrenar.py`) y una hoja por mes del estudio de caso (2026-04 a 2026-09, origen rodante; septiembre incompleto). Columnas: código, descripción, origen, decisión, probabilidad, ventas del mes anterior, predicción combinada, solo modelo, real, diferencia, error %, clase real y acierto. Clase real: crecimiento mayor a 15 % Reforzar, caída mayor a 10 % o cero Reducir, en otro caso Mantener (en blanco para los productos por promedio). Decisiones acertadas por mes: 2026-04 360/697 (51,6 %), 05 424/760 (55,8 %), 06 390/764 (51,0 %), 07 443/724 (61,2 %), 08 449/759 (59,2 %), 09 525/856 (61,3 %). La hoja de abril coincide con `/api/summary` de la corrida real (247.013.009 + 60.621.383 = 307.634.392 COP).
+
+---
+
 ## [Experimento] Elegibilidad ampliada - 2026-10-13
 
 Experimento sin cambios en el comportamiento de producción: `SalesForecastModel` gana el parámetro opcional `elegibilidad_ampliada` (por defecto `False`; con `False` el conjunto elegible, las etiquetas, la partición y las predicciones son los de siempre, verificado con pruebas) y los ayudantes puros viven en `src/ventas_forecast/eligibility.py`. El modelo, el dashboard y `entrenar.py` no cambian. Informe: `outputs/reports/experimento_elegibilidad.txt/.csv`; figura `outputs/figures/experimento_elegibilidad.png` (`outputs/` no se versiona; se regenera con `scripts/experimento_elegibilidad.py`).
