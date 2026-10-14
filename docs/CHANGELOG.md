@@ -1,3 +1,35 @@
+## [Experimento] Predicción mensual por grupo - 2026-10-14
+
+Experimento sin cambios en producción (modelo, dashboard y `entrenar.py` intactos). Meta del usuario: un pronóstico mensual de ~70 % que sirva para decidir compras; por producto no se alcanza (mejor acierto medio 38 %, ver "[Experimento] Acierto del monto por producto"), así que se probó el nivel de **grupo de producto** (`PRODUCTO.IDGRUPO`, el nivel en que el taller compra por línea o proveedor). Script `scripts/experimento_grupos.py`, ayudantes puros `src/ventas_forecast/grupos.py` (22 pruebas), catálogo `data/raw/grupos_productos.csv` (6.395 productos, 144 nombres de grupo; se regenera con `sql/extraer_grupos.py`; sin datos de clientes), informe `outputs/reports/experimento_grupos.txt/.csv` y figura `outputs/figures/experimento_grupos.png`.
+
+**Diseño.** Mismo origen rodante del estudio de caso (meses 2026-04 a 2026-09; septiembre llega al 22) y entrenamiento solo con datos anteriores a cada mes. Universo = productos que muestra el dashboard en cada origen (modelo con monto + estimación por promedio), sumados por grupo (77 a 83 grupos por mes; ningún producto sin grupo). También se mide contra "todos los productos del grupo" (incluye los que el sistema no predice). Métrica principal: acierto ponderado por valor 1−WAPE entre grupos (Σ|R−P| / ΣR), agrupado y por mes; además acierto medio por grupo (1 − |R−P|/R recortado, R > 0), porcentaje de grupos con acierto ≥ 70 %, los 20 grupos con más ventas y razón de sumas. Variantes: **G0** suma de las predicciones por producto de producción; **G1** media de 3 meses del grupo; **G2** modelo directo (RF; G2x con XGBoost) sobre la serie mensual del grupo con rezagos 1/2/3/6/12, medias 3/6, mes seno/coseno, productos activos y facturas, objetivo log1p y mezcla con G1 cuyo peso sale de una validación interna (últimos 3 meses conocidos, modelo que no los ve); **G3** mezcla de G0 y G2 (G3b: con G1) con el peso que minimiza el error en los meses ya cerrados (0,5 sin historia; G3f: 50/50 fijo); **G4** G0 reconciliada al total del grupo de G2 (G4b: de G1). Nada se ajusta con el holdout. La elección de "la mejor variante" al leer la tabla sí mira el holdout y es optimista.
+
+**Verificación.** G0 reproduce 67,6 % agrupado (acierto medio por grupo 49,1 %; el cálculo previo del orquestador daba 49,2 %; la diferencia de una décima no se investigó). Las ventas del último mes de las series por grupo coinciden con las del modelo de cada origen.
+
+**Acierto ponderado por valor (universo), por mes y agrupado.**
+
+| Variante | Abr | May | Jun | Jul | Ago | Sep* | Agrupado | Meses ≥ 70 % |
+|---|---|---|---|---|---|---|---|---|
+| G0: suma de productos (producción) | 72,1 % | 64,5 % | 46,6 % | 74,0 % | 70,6 % | 72,8 % | 67,6 % | 4 de 6 |
+| G1: media de 3 meses del grupo | 76,4 % | 70,3 % | 34,0 % | 72,0 % | 70,9 % | 72,4 % | 67,6 % | 5 de 6 |
+| G2: modelo directo (RF) | 76,4 % | 70,3 % | 32,5 % | 76,0 % | 73,2 % | 72,3 % | 68,4 % | 5 de 6 |
+| G2x: modelo directo (XGBoost) | 76,4 % | 70,3 % | 34,0 % | 71,6 % | 73,9 % | 71,6 % | 67,9 % | 5 de 6 |
+| G3: mezcla G0 y G2 | 76,4 % | 69,3 % | 32,5 % | 75,1 % | 73,4 % | 73,2 % | 68,3 % | 4 de 6 |
+| G3b: mezcla G0 y G1 | 76,4 % | 69,3 % | 34,0 % | 73,9 % | 73,2 % | 73,4 % | 68,2 % | 4 de 6 |
+| G3f: mezcla 50/50 G0 y G2 | 76,4 % | 67,6 % | 39,5 % | 75,1 % | 73,4 % | 73,4 % | 68,8 % | 4 de 6 |
+| G4: G0 reconciliada a G2 | 76,4 % | 70,3 % | 32,5 % | 76,0 % | 73,2 % | 72,3 % | 68,4 % | 5 de 6 |
+| G4b: G0 reconciliada a G1 | 76,4 % | 70,3 % | 34,0 % | 72,0 % | 70,9 % | 72,4 % | 67,6 % | 5 de 6 |
+
+(*) Septiembre incompleto. Otras métricas agrupadas (G0 / G1 / G2 / G3f): acierto medio por grupo 49,1 / 47,3 / 47,3 / 48,3 %; grupos con acierto ≥ 70 % 33,8 / 32,4 / 34,3 / 33,1 %; 20 grupos con más ventas 73,4 / 74,5 / 74,7 / 74,9 %; razón de sumas 0,93 / 1,08 / 1,05 / 0,99. Intervalos de 95 % (remuestreo de grupo-meses) del acierto agrupado: 60 a 74 % para todas las variantes, es decir, ninguna se distingue de G0 ni del 70 %.
+
+**Todos los productos del grupo.** G0 baja a 60,1 % (el universo cubre 71 a 80 % del real del grupo) y la razón de sumas es 0,71; G1 65,4 %, G2 66,0 % y G2x 65,2 % (3, 4 y 2 meses de 6 sobre 70 %).
+
+**Productos (G4).** Reconciliar a G2 o G1 no ayuda por producto: 1−WAPE por producto 15,2 % (G0) frente a 11,4 % (G4) y 10,3 % (G4b); acierto medio 36,0 / 35,7 / 35,6 %.
+
+**Resultado.** Ninguna variante llega a 70 % agrupado en el universo; la mejor (G3f, 68,8 %; G2 68,4 % con el peso elegido por validación) queda a 1 o 2 puntos. Por mes se supera 70 % en 4 a 5 de los 6 meses, pero junio rompe el agrupado: el real cayó a 263 M frente a 492 M de mayo (un salto que ningún método anticipa, solo G0 se defiende mejor con 46,6 %). Descriptivo y a posteriori, sin junio el agrupado sería 70,6 % (G0), 72,3 % (G1), 73,5 % (G2) y 73,0 % (G3f); no se usó para elegir nada. Por grupo individual el acierto sigue siendo bajo (medio 47 a 49 %, solo un tercio de los grupos llega a 70 %); lo que sí alcanza ~70 % es el acierto ponderado por valor, dominado por los grupos grandes (los 20 con más ventas: 73 a 75 %).
+
+**Recomendación.** No se integra al sistema: la meta de 70 % agrupado no se cumple y la ganancia de G2/G3 sobre la suma de productos actual (G0, 67,6 %) no es demostrable (diferencia 0,8 a 1,2 puntos, intervalos superpuestos). Si se quiere una guía de compra por línea, la suma de la predicción por producto agrupada por grupo ya ofrece ~68 % ponderado (~73 % en los 20 grupos con más ventas) sin cambiar el modelo, siempre advirtiendo que el acierto por grupo pequeño es bajo y que un mes con un salto de demanda no se anticipa.
+
 ## [Sistema] Probabilidad de venta en el dashboard - 2026-10-14
 
 Decisión del orquestador, dentro del objetivo del usuario de mejorar las decisiones de compra: llevar a producción el clasificador binario "¿tendrá ventas el mes siguiente?" del experimento "[Experimento] Probabilidad de venta (meta 70 %)" (Random Forest balanceado: exactitud agrupada 70,8 %, balanceada 69,8 %, AUC 0,773, frente a 62,5 % de la regla "vendió el mes anterior"). Aporta una probabilidad y un orden de los productos (AUC 0,77) que la regla simple no da; frente a la regla "fracción histórica > 0,5" (70,3 %) la diferencia no es demostrable, como dice el experimento. Los montos no cambian: el experimento "Acierto del monto por producto" no encontró una variante que valga la pena desplegar.
