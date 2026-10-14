@@ -46,14 +46,17 @@ NOMBRES_MES = {
 }
 COLS_COP = ["Ventas mes anterior (COP)", "Predicción combinada (COP)",
             "Solo modelo (COP)", "Real del mes (COP)",
-            "Diferencia (real − predicción)"]
+            "Diferencia (real − predicción)", "Stock sugerido (70 %)",
+            "Stock sugerido (unidades)"]
 ANCHOS = {"Código": 11, "Descripción": 52, "Origen": 10, "Decisión recomendada": 40,
           "Prob. crecimiento": 13, "Ventas mes anterior (COP)": 18,
           "Predicción combinada (COP)": 19, "Solo modelo (COP)": 16,
           "Real del mes (COP)": 16, "Diferencia (real − predicción)": 19,
           "Error %": 9, "Clase real": 11, "¿Acertó la decisión?": 13,
           "Probabilidad de venta": 14, "¿Se venderá? (predicción)": 14,
-          "¿Se vendió?": 11, "¿Acertó venta?": 11}
+          "¿Se vendió?": 11, "¿Acertó venta?": 11,
+          "Stock sugerido (70 %)": 16, "Stock sugerido (unidades)": 14,
+          "Unidades reales": 12, "¿Cubrió la demanda?": 13}
 
 COMO_LEER = [
     ("Cómo leer este archivo", None),
@@ -107,6 +110,22 @@ COMO_LEER = [
                     "vendió."),
     ("¿Acertó venta?", "Sí si la predicción \"¿Se venderá?\" coincide con lo que pasó "
                        "(\"¿Se vendió?\")."),
+    ("Stock sugerido (70 %)", "Nivel de abastecimiento (COP) para el mes: si se tiene en "
+                              "inventario hasta este valor, la demanda queda cubierta en "
+                              "cerca de 7 de cada 10 productos. Se calcula corrigiendo la "
+                              "predicción con los errores del modelo en su validación "
+                              "interna (nunca con el mes evaluado), según la probabilidad "
+                              "de venta del producto. Es un máximo de abastecimiento, no "
+                              "una predicción exacta: normalmente queda por encima de lo "
+                              "que se vende y para los productos con muy baja probabilidad "
+                              "de venta es casi cero. En blanco para los productos del modelo "
+                              "sin monto predicho."),
+    ("Stock sugerido (unidades)", "El stock sugerido en pesos dividido entre el último precio "
+                                  "promedio conocido del producto, redondeado hacia arriba."),
+    ("Unidades reales", "Unidades que realmente se vendieron ese mes (0 si no hubo ventas)."),
+    ("¿Cubrió la demanda?", "Sí si lo que realmente se vendió (en pesos) fue menor o igual al "
+                            "stock sugerido; No en otro caso. Un producto que no vendió cuenta "
+                            "como cubierto."),
     ("Grupos", "Compara, por grupo de producto (la línea o proveedor con la que se compra), "
                "la suma de las predicciones de sus productos con lo que realmente vendieron "
                "esos mismos productos en el mes. Solo cuentan los productos con monto "
@@ -125,7 +144,13 @@ COMO_LEER = [
                 "\"% acierto de venta\" es el porcentaje de productos cuya venta (sí/no) "
                 "se acertó entre los productos del modelo con monto y los de estimación "
                 "por promedio (los que muestra el dashboard con monto); \"% acierto de "
-                "venta (todos)\" incluye además los productos del modelo sin monto."),
+                "venta (todos)\" incluye además los productos del modelo sin monto. "
+                "\"Cobertura del stock sugerido\" es el porcentaje de productos con stock "
+                "sugerido cuya demanda real quedó cubierta (la meta del nivel de servicio es "
+                "70 %; incluye los que no vendieron); \"Cobertura (los que vendieron)\" lo "
+                "mide solo entre los productos que sí vendieron, \"Cobertura (unidades)\" "
+                "compara las unidades reales con el stock en unidades y \"Stock total / real\" "
+                "es la suma del stock sugerido entre las ventas reales (sobrestock)."),
 ]
 
 
@@ -142,15 +167,17 @@ def entrenar_abril(tmp):
     m.predict_next_month()
     m.estimar_por_promedio()
     m.agregar_probabilidad_venta()
+    m.agregar_stock_sugerido()
     return m
 
 
 def tabla_de_modelo(model, mes):
     c = model._c
     real = cs.monthly_sales(ec.HOLDOUT, mes)
+    real_unid = cs.monthly_units(ec.HOLDOUT, mes)
     tabla = pr.tabla_producto(model.results, real, c("id"), c("description"),
                               c("total_sold"), model.growth_threshold,
-                              model.reduce_threshold)
+                              model.reduce_threshold, real_unid=real_unid)
     real_top = float(real.reindex(model._top_prods.astype(str)).fillna(0.0).sum())
     tabla["_orden"] = (tabla["Origen"] == "promedio").astype(int)
     tabla = (tabla.sort_values(["_orden", "Predicción combinada (COP)"],
@@ -182,13 +209,15 @@ def escribir_hoja(ws, tabla):
             fmt = "0.0%"
         elif col in ("Prob. crecimiento", "Probabilidad de venta"):
             fmt = "0%"
+        elif col == "Unidades reales":
+            fmt = "#,##0.##"
         else:
             continue
         for row in range(2, ws.max_row + 1):
             ws.cell(row=row, column=j).number_format = fmt
 
 
-def escribir_resumen(ws, resumen):
+def escribir_resumen(ws, resumen, cobertura=None):
     from openpyxl.styles import Alignment, Font
     from openpyxl.utils import get_column_letter
     df = pd.DataFrame(resumen)
@@ -206,7 +235,7 @@ def escribir_resumen(ws, resumen):
             fmt = "#,##0"
         elif col.startswith("%") or col.startswith("Cobertura"):
             fmt = "0.0%"
-        elif col.startswith("Razón"):
+        elif col.startswith("Razón") or col == "Stock total / real":
             fmt = "0.000"
         else:
             continue
@@ -220,6 +249,13 @@ def escribir_resumen(ws, resumen):
         "las decisiones. El % de acierto de venta usa los productos del modelo con monto y "
         "los de estimación por promedio; el de \"todos\" incluye los productos del modelo "
         "sin monto."))
+    if cobertura:
+        ws.cell(row=ws.max_row + 2, column=1, value=(
+            f"Cobertura del stock sugerido (70 %) de los seis meses juntos: "
+            f"{100 * cobertura['cobertura']:.1f} % de {cobertura['n']:,} producto-mes "
+            f"({100 * cobertura['cobertura_vendieron']:.1f} % entre los que vendieron; "
+            f"unidades: {100 * cobertura['cobertura_unid']:.1f} %). Stock total / real: "
+            f"{cobertura['total_stock_real']:.2f}."))
 
 
 def escribir_grupos(ws, resumen, detalle):
@@ -307,6 +343,7 @@ def main():
             _, _, _, model = ec.evaluar_mes(mes, tmp, con_modelo=True)
             model.estimar_por_promedio()
             model.agregar_probabilidad_venta()
+            model.agregar_stock_sugerido()
             tabla, real_top = tabla_de_modelo(model, mes)
             tablas[mes] = tabla
             resumen.append(pr.resumen_mes(mes, tabla, real_top))
@@ -314,7 +351,8 @@ def main():
     wb = Workbook()
     escribir_como_leer(wb.active)
     wb.active.title = "Cómo leer"
-    escribir_resumen(wb.create_sheet("Resumen"), resumen)
+    cobertura = pr.cobertura_agrupada(tablas)
+    escribir_resumen(wb.create_sheet("Resumen"), resumen, cobertura)
     por_grupo = {m: pr.tabla_grupos_mes(t, mapa) for m, t in tablas.items()}
     resumen_grupos = pr.resumen_grupos(por_grupo)
     escribir_grupos(wb.create_sheet("Grupos"), resumen_grupos, por_grupo)
@@ -332,6 +370,7 @@ def main():
             shutil.copy2(f, destino / f.name)
         print(f"[OK] copiado a {destino}")
     print(pd.DataFrame(resumen).T.to_string())
+    print("Cobertura agrupada:", cobertura)
     print(resumen_grupos.to_string())
 
 

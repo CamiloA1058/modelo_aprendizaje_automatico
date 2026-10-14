@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from ventas_forecast import case_study as cs
+from ventas_forecast import stock_sugerido as ss
 
 COLUMNAS = [
     "Código", "Descripción", "Origen", "Decisión recomendada",
@@ -23,15 +24,21 @@ COLUMNAS = [
     "¿Acertó la decisión?",
     "Probabilidad de venta", "¿Se venderá? (predicción)", "¿Se vendió?",
     "¿Acertó venta?",
+    "Stock sugerido (70 %)", "Stock sugerido (unidades)", "Unidades reales",
+    "¿Cubrió la demanda?",
 ]
 _NOMBRE_CLASE = {0: "Reducir", 1: "Mantener", 2: "Reforzar"}
 _DECISION_A_NOMBRE = {"Reducir stock": "Reducir", "Mantener stock": "Mantener",
                       "Reforzar stock": "Reforzar"}
 
 
-def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce):
+def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce,
+                   real_unid=None):
     """DataFrame con COLUMNAS, una fila por producto de results. real es una
-    Serie de ventas reales indexada por codigo (texto); sin dato = 0."""
+    Serie de ventas reales indexada por codigo (texto); sin dato = 0.
+    real_unid (opcional) son las unidades reales por codigo; sin ella
+    'Unidades reales' queda vacia. El stock sugerido sale de las columnas
+    stock_sugerido / stock_sugerido_unidades de results (vacio si no existen)."""
     r = results
     if "origen_estimacion" in r.columns:
         origen = r["origen_estimacion"].to_numpy()
@@ -63,6 +70,20 @@ def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce):
 
     with np.errstate(divide="ignore", invalid="ignore"):
         error = np.where(real_v > 0, np.abs(real_v - pred) / real_v, np.nan)
+
+    if "stock_sugerido" in r.columns:
+        stock = r["stock_sugerido"].to_numpy(float)
+        stock_u = (r["stock_sugerido_unidades"].to_numpy(float)
+                   if "stock_sugerido_unidades" in r.columns
+                   else np.full(len(r), np.nan))
+        cubrio = np.where(np.isnan(stock), "",
+                          np.where(real_v <= np.nan_to_num(stock) + 1e-6, "Sí", "No"))
+    else:
+        stock = np.full(len(r), np.nan)
+        stock_u = np.full(len(r), np.nan)
+        cubrio = np.full(len(r), "", dtype=object)
+    real_u = (real_unid.reindex(ids.to_numpy()).fillna(0.0).to_numpy(float)
+              if real_unid is not None else np.full(len(r), np.nan))
     out = pd.DataFrame({
         "Código": ids.to_numpy(),
         "Descripción": r[desc_col].to_numpy(),
@@ -84,8 +105,26 @@ def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce):
         "¿Se venderá? (predicción)": se_vendera,
         "¿Se vendió?": np.where(vendio, "Sí", "No"),
         "¿Acertó venta?": acierto_venta,
+        "Stock sugerido (70 %)": stock,
+        "Stock sugerido (unidades)": stock_u,
+        "Unidades reales": real_u,
+        "¿Cubrió la demanda?": cubrio,
     })
     return out[COLUMNAS]
+
+
+def _cobertura_tabla(tabla):
+    """Metricas de ventas_forecast.stock_sugerido.cobertura sobre las filas de
+    la tabla con stock sugerido (el universo del dashboard)."""
+    t = tabla[tabla["Stock sugerido (70 %)"].notna()]
+    return ss.cobertura(t["Real del mes (COP)"], t["Stock sugerido (70 %)"],
+                        t["Unidades reales"], t["Stock sugerido (unidades)"])
+
+
+def cobertura_agrupada(tablas):
+    """Cobertura del stock sugerido de todos los meses apilados; 'tablas' es
+    {mes: tabla_producto}."""
+    return _cobertura_tabla(pd.concat(list(tablas.values()), ignore_index=True))
 
 
 def resumen_mes(mes, tabla, real_top_total=None):
@@ -106,6 +145,7 @@ def resumen_mes(mes, tabla, real_top_total=None):
     univ = univ[univ["¿Acertó venta?"] != ""]
     ac_univ = int((univ["¿Acertó venta?"] == "Sí").sum())
     ac_todos = int((con_venta["¿Acertó venta?"] == "Sí").sum())
+    cob = _cobertura_tabla(tabla)
     pred_mod, pred_prom = float(mod_m[pred].sum()), float(prom[pred].sum())
     real_mod, real_prom = float(mod_m[real].sum()), float(prom[real].sum())
     real_total = real_mod + real_prom
@@ -140,6 +180,11 @@ def resumen_mes(mes, tabla, real_top_total=None):
                              if len(mod_m) else float("nan")),
         "MAE promedio (COP)": (float((prom[real] - prom[pred]).abs().mean())
                                if len(prom) else float("nan")),
+        "Productos evaluados (stock)": cob["n"],
+        "Cobertura del stock sugerido": cob["cobertura"],
+        "Cobertura (los que vendieron)": cob["cobertura_vendieron"],
+        "Cobertura (unidades)": cob["cobertura_unid"],
+        "Stock total / real": cob["total_stock_real"],
     }
 
 
