@@ -27,6 +27,7 @@ DEFAULT_OUTPUT = DEFAULT_PREDICTION
 
 # ── Importar modelo ───────────────────────────────────────────────────────────
 from ventas_forecast.model import SalesForecastModel, ETIQUETA_SIN_RECOMENDACION
+from ventas_forecast import grupos as grupos_mod
 
 app = Flask(__name__)
 CORS(app)
@@ -78,6 +79,8 @@ def _run_model(filepath, col_map, params):
                 params.get("estimacion_por_promedio", "true")).lower() != "false",
             probabilidad_venta=str(
                 params.get("probabilidad_venta", "true")).lower() != "false",
+            resumen_por_grupo=str(
+                params.get("resumen_por_grupo", "true")).lower() != "false",
         )
 
         _log("✔ Cargando y limpiando datos…")
@@ -116,6 +119,10 @@ def _run_model(filepath, col_map, params):
             model.agregar_probabilidad_venta()
             _log(f"  → Umbral {model.sale_threshold:.2f} | exactitud de validación "
                  f"interna {model.sale_val_accuracy:.1%}")
+
+        if model.resumen_por_grupo:
+            _log("✔ Sumando las predicciones por grupo de producto…")
+            model.agregar_resumen_grupo()
 
         _state["model"]        = model
         _state["results"]      = model.results
@@ -299,6 +306,7 @@ def api_products():
     c     = model._c
 
     q        = request.args.get("q", "").upper()
+    grupo    = request.args.get("grupo", "")
     dec      = request.args.get("decision", "")
     page     = int(request.args.get("page", 1))
     size     = int(request.args.get("size", 50))
@@ -315,6 +323,14 @@ def api_products():
     if "origen_estimacion" not in out.columns:
         out["origen_estimacion"] = "modelo"
     out = out.fillna(0)
+
+    # Grupo de producto (catálogo cargado por agregar_resumen_grupo)
+    mapa = getattr(model, "mapa_grupos", None)
+    if mapa is not None:
+        g = pd.Series(grupos_mod.asignar_grupo(out["CODIGO"], mapa), index=out.index)
+        out["grupo"] = g.where(g != grupos_mod.SIN_GRUPO, grupos_mod.ETIQUETA_SIN_GRUPO)
+        if grupo:
+            out = out[out["grupo"] == grupo]
 
     if q:
         out = out[
@@ -346,6 +362,25 @@ def api_products():
         "size":  size,
         "mes_predicho": _state["mes_predicho"],
         "data":  out.to_dict(orient="records"),
+    })
+
+
+@app.route("/api/grupos")
+def api_grupos():
+    """Suma de las predicciones por grupo de producto (variante G0)."""
+    df = _state["results"]
+    if df is None:
+        return jsonify({"ok": False}), 404
+    tabla = getattr(_state["model"], "resumen_grupos", None)
+    if tabla is None:
+        tabla = pd.DataFrame({c: [] for c in grupos_mod.COLUMNAS_RESUMEN})
+    filas = tabla.astype(object).where(tabla.notna(), None).to_dict(orient="records")
+    return jsonify({
+        "ok":           True,
+        "mes_predicho": _state["mes_predicho"],
+        "total_grupos": len(filas),
+        "pred_total":   float(tabla["prediccion"].sum()) if len(tabla) else 0.0,
+        "data":         filas,
     })
 
 

@@ -249,3 +249,47 @@ def tabla_grupos(resultados, mapa, id_col, total_col, pred_grupo):
                                 np.nan)
     return (out.sort_values("Predicción del grupo (COP)", ascending=False, kind="stable")
             .reset_index(drop=True))
+
+
+# ── Vista por grupo del mes predicho (dashboard) ─────────────────────────────
+ETIQUETA_SIN_GRUPO = "Sin grupo"
+COLUMNAS_RESUMEN = ["grupo", "productos", "se_vendera", "prediccion",
+                    "mes_anterior", "variacion", "pct_total"]
+
+
+def resumen_grupos(resultados, mapa, id_col, total_col):
+    """Suma de las predicciones por producto de cada grupo (variante G0).
+
+    Una fila por grupo, ordenada por la prediccion del grupo: productos con
+    monto predicho (modelo y promedio), cuantos de ellos probablemente se
+    venderan (se_vendera == "Si"), prediccion, ventas del mes anterior de esos
+    mismos productos, variacion (fraccion; NaN sin ventas previas) y fraccion
+    del total predicho. Los codigos sin grupo van en "Sin grupo". No modifica
+    'resultados'."""
+    r = resultados[resultados["ventas_predichas"].notna()]
+    if len(r) == 0:
+        return pd.DataFrame({c: [] for c in COLUMNAS_RESUMEN})
+    grupo = pd.Series(asignar_grupo(r[id_col], mapa), index=r.index)
+    grupo = grupo.where(grupo != SIN_GRUPO, ETIQUETA_SIN_GRUPO)
+    if "se_vendera" in r.columns:
+        vende = (r["se_vendera"] == "Sí").astype(int)
+    else:
+        vende = pd.Series(0, index=r.index)
+    g = pd.DataFrame({
+        "grupo": grupo, "n": 1, "vende": vende,
+        "pred": r["ventas_predichas"].astype(float),
+        "previo": r[total_col].astype(float),
+    }).groupby("grupo").sum()
+    total = g["pred"].sum()
+    previo = g["previo"]
+    out = pd.DataFrame({
+        "grupo": g.index,
+        "productos": g["n"].to_numpy(int),
+        "se_vendera": g["vende"].to_numpy(int),
+        "prediccion": g["pred"].to_numpy(float),
+        "mes_anterior": previo.to_numpy(float),
+        "variacion": np.where(previo > 0, g["pred"] / previo.where(previo > 0) - 1.0,
+                              np.nan),
+        "pct_total": g["pred"].to_numpy(float) / total if total else np.nan,
+    })
+    return out.sort_values("prediccion", ascending=False, kind="stable").reset_index(drop=True)

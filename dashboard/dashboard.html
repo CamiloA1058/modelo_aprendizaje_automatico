@@ -173,6 +173,10 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73L13 2.27a2 2 0 0 0-2 0L4 6.27A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73L11 21.73a2 2 0 0 0 2 0L20 17.73A2 2 0 0 0 21 16z"/></svg>
     Productos
   </button>
+  <button class="nav-item" id="nav-grupos" onclick="nav(this,'grupos')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/><circle cx="6" cy="7" r="0.6"/><circle cx="6" cy="12" r="0.6"/><circle cx="6" cy="17" r="0.6"/></svg>
+    Grupos
+  </button>
 
   <div class="nav-section">Configuración</div>
   <button class="nav-item" onclick="nav(this,'ejecutar')">
@@ -312,6 +316,42 @@
     </div>
   </div>
 
+  <!-- GRUPOS -->
+  <div class="page" id="page-grupos">
+    <div class="page-header">
+      <h1>Predicción por grupo de producto</h1>
+      <p id="grupos-subtitle">Suma de las predicciones de los productos de cada grupo. Haz clic en un grupo para ver sus productos.</p>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;font-size:13px;line-height:1.5;">
+      En los meses de prueba (abril a septiembre de 2026) la predicción por grupo acertó en promedio el 68 % del valor vendido; en los 20 grupos que más venden, cerca del 73 %. Úsela como guía para planear pedidos por línea.
+    </div>
+
+    <div class="toolbar">
+      <input type="text" id="grupos-search" placeholder="Buscar grupo…" oninput="renderGrupos()">
+      <span id="grupos-count" style="margin-left:auto;font-size:12px;color:var(--muted);"></span>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Grupo</th>
+            <th title="Productos con monto predicho (modelo y promedio)">Productos</th>
+            <th title="Productos que probablemente se venderán el mes predicho">Se venderán</th>
+            <th>Predicción <small id="th-grupos-mes" style="font-size:9px;font-weight:400"></small></th>
+            <th>Ventas mes anterior</th>
+            <th>Variación</th>
+            <th>% del total</th>
+          </tr></thead>
+          <tbody id="grupos-body">
+            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- PRODUCTOS -->
   <div class="page" id="page-productos">
     <div class="page-header">
@@ -321,6 +361,7 @@
 
     <div class="toolbar">
       <input type="text" id="search-input" placeholder="Buscar por código o nombre…" oninput="filterProducts()">
+      <span id="grupo-chip" class="badge blue" style="display:none;cursor:pointer;" onclick="limpiarGrupo()" title="Quitar el filtro de grupo"></span>
       <select id="filter-decision" onchange="filterProducts()">
         <option value="">Todas las decisiones</option>
         <option value="Reforzar stock">Reforzar stock</option>
@@ -449,7 +490,8 @@
 
 <script>
 // ── Estado ─────────────────────────────────────────────────────────────────
-let _page = 1, _query = '', _decision = '', _venta = '', _sortBy = 'prob';
+let _page = 1, _query = '', _decision = '', _venta = '', _sortBy = 'prob', _grupo = '';
+let _gruposData = [];
 let _polling = null, _selectedFile = null;
 let _chartHist = null, _chartDonut = null, _chartDetail = null;
 
@@ -473,7 +515,60 @@ function nav(btn, id) {
   document.getElementById('page-' + id).classList.add('active');
   btn.classList.add('active');
   if (id === 'resumen')   loadSummary();
-  if (id === 'productos') { _page = 1; loadProducts(); }
+  if (id === 'productos') { _page = 1; if (!_irAProductosDeGrupo) _grupo = ''; _irAProductosDeGrupo = false; actualizarChipGrupo(); loadProducts(); }
+  if (id === 'grupos')    loadGrupos();
+}
+
+// ── Grupos ───────────────────────────────────────────────────────────────────
+let _irAProductosDeGrupo = false;
+
+async function loadGrupos() {
+  const d = await apiGet('/api/grupos');
+  if (!d.ok) return;
+  _gruposData = d.data || [];
+  if (d.mes_predicho) document.getElementById('th-grupos-mes').textContent = d.mes_predicho;
+  renderGrupos();
+}
+
+function renderGrupos() {
+  const q = document.getElementById('grupos-search').value.trim().toUpperCase();
+  const tbody = document.getElementById('grupos-body');
+  const filas = _gruposData.map((g, i) => ({ g, i }))
+    .filter(x => !q || x.g.grupo.toUpperCase().includes(q));
+  document.getElementById('grupos-count').textContent = fmt(filas.length) + ' grupos';
+  if (!filas.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filas.map(({ g, i }) => `
+    <tr onclick="verProductosDeGrupo(${i})" title="Ver los productos de este grupo">
+      <td class="desc">${g.grupo}</td>
+      <td>${fmt(g.productos)}</td>
+      <td>${fmt(g.se_vendera)} <span style="color:var(--muted);font-size:11px">de ${fmt(g.productos)}</span></td>
+      <td>${COP(g.prediccion)}</td>
+      <td>${COP(g.mes_anterior)}</td>
+      <td>${g.variacion != null ? deltaHtml(g.variacion * 100) : '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${(g.pct_total * 100).toFixed(1)}%</td>
+    </tr>`).join('');
+}
+
+function verProductosDeGrupo(i) {
+  _grupo = _gruposData[i].grupo;
+  _irAProductosDeGrupo = true;
+  nav(document.querySelector('.nav-item[onclick*="productos"]'), 'productos');
+}
+
+function actualizarChipGrupo() {
+  const chip = document.getElementById('grupo-chip');
+  chip.style.display = _grupo ? 'inline-flex' : 'none';
+  chip.textContent = _grupo ? 'Grupo: ' + _grupo + ' ✕' : '';
+}
+
+function limpiarGrupo() {
+  _grupo = '';
+  actualizarChipGrupo();
+  _page = 1;
+  loadProducts();
 }
 
 async function apiGet(url) {
@@ -786,7 +881,7 @@ function changePage(dir) {
 }
 
 async function loadProducts() {
-  const params = new URLSearchParams({ q: _query, decision: _decision, venta: _venta, page: _page, size: 50, sort: _sortBy });
+  const params = new URLSearchParams({ q: _query, decision: _decision, venta: _venta, grupo: _grupo, page: _page, size: 50, sort: _sortBy });
   const d = await apiGet('/api/products?' + params);
   if (!d.ok) return;
 

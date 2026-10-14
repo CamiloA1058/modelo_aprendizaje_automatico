@@ -160,5 +160,45 @@ class ProbabilidadDeVentaTest(unittest.TestCase):
         self.assertEqual(r["Productos evaluados (venta)"], 0)
 
 
+class GruposExcelTest(unittest.TestCase):
+    def setUp(self):
+        import io
+        from ventas_forecast import grupos as gr
+        self.mapa = gr.cargar_mapa(io.StringIO(
+            "codigo;id_grupo;grupo\nA;1;FRENOS\nB;1;FRENOS\nC;2;ACEITES\n"))
+        self.t = pr.tabla_producto(_resultados(), REAL, "CODIGO", "DESCRIPCION",
+                                   "TOTAL_VENDIDO", 1.15, 0.90)
+
+    def test_tabla_por_grupo_del_mes(self):
+        g = pr.tabla_grupos_mes(self.t, self.mapa).set_index("Grupo")
+        # universo: productos con monto (A, B, C y el promedio P); D queda fuera
+        self.assertEqual(g.loc["FRENOS", "Predicción (COP)"], 220.0)
+        self.assertEqual(g.loc["FRENOS", "Real (COP)"], 200.0)
+        self.assertEqual(g.loc["FRENOS", "Diferencia (real − predicción)"], -20.0)
+        self.assertAlmostEqual(g.loc["FRENOS", "Acierto %"], 0.9)
+        self.assertEqual(g.loc["Sin grupo", "Predicción (COP)"], 50.0)
+        self.assertEqual(g.loc["Sin grupo", "Real (COP)"], 40.0)
+        self.assertNotIn("D", g.index)
+
+    def test_acierto_recortado_y_vacio_sin_real(self):
+        g = pr.tabla_grupos_mes(self.t, self.mapa).set_index("Grupo")
+        self.assertAlmostEqual(g.loc["ACEITES", "Acierto %"], 1 - 15 / 105)
+        t = self.t.copy()
+        t.loc[t["Código"] == "C", "Real del mes (COP)"] = 0.0
+        g = pr.tabla_grupos_mes(t, self.mapa).set_index("Grupo")
+        self.assertTrue(np.isnan(g.loc["ACEITES", "Acierto %"]))
+
+    def test_resumen_ponderado_por_mes_y_agrupado(self):
+        g = pr.tabla_grupos_mes(self.t, self.mapa)
+        r = pr.resumen_grupos({"2026-04": g, "2026-05": g})
+        fila = r[r["Mes"] == "2026-04"].iloc[0]
+        # |R-P| por grupo: 20 + 15 + 10 = 45 sobre un real de 345
+        self.assertAlmostEqual(fila["Acierto ponderado"], 1 - 45 / 345)
+        self.assertEqual(fila["Grupos"], 3)
+        pool = r[r["Mes"] == "Agrupado"].iloc[0]
+        self.assertAlmostEqual(pool["Acierto ponderado"], 1 - 45 / 345)
+        self.assertEqual(pool["Grupos"], 6)
+
+
 if __name__ == "__main__":
     unittest.main()

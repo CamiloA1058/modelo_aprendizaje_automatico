@@ -42,10 +42,11 @@ from sklearn.metrics import (
 )
 
 from ventas_forecast import eligibility as el
+from ventas_forecast import grupos
 from ventas_forecast import improvements as im
 from ventas_forecast import sale_probability as sp
 from ventas_forecast.data.cleaning import remove_bulk_adjustments
-from ventas_forecast.paths import DEFAULT_PREDICTION
+from ventas_forecast.paths import DATA_RAW, DEFAULT_PREDICTION
 
 # ── Nombres de columna por defecto ────────────────────────────────────────────
 DEFAULT_COL_MAP = {
@@ -148,6 +149,13 @@ class SalesForecastModel:
                           clases, el regresor, la mezcla ni la estimacion por
                           promedio. Con False la salida es la de antes del
                           paso.
+    resumen_por_grupo   : True por defecto (produccion). Al final del
+                          pipeline, agregar_resumen_grupo() suma las
+                          predicciones por producto de cada grupo del
+                          catalogo grupos_path (data/raw/grupos_productos.csv)
+                          y lo deja en resumen_grupos. Solo lee los
+                          resultados: no cambia ninguna prediccion, decision
+                          ni total. Con False no se calcula.
     """
 
     def __init__(
@@ -171,6 +179,8 @@ class SalesForecastModel:
         elegibilidad_ampliada=False,
         estimacion_por_promedio=True,
         probabilidad_venta=True,
+        resumen_por_grupo=True,
+        grupos_path=None,
     ):
         self.filepath        = Path(filepath)
         self.sep             = sep
@@ -194,6 +204,11 @@ class SalesForecastModel:
         self.elegibilidad_ampliada = elegibilidad_ampliada
         self.estimacion_por_promedio = estimacion_por_promedio
         self.probabilidad_venta = probabilidad_venta
+        self.resumen_por_grupo = resumen_por_grupo
+        self.grupos_path = Path(grupos_path) if grupos_path else DATA_RAW / "grupos_productos.csv"
+        # Poblados por agregar_resumen_grupo()
+        self.resumen_grupos = None
+        self.mapa_grupos = None
         # Opcional (solo experimentos): funcion que recibe los meses actuales
         # (fecha) de las filas de entrenamiento y devuelve sus pesos de
         # muestra. None = sin pesos (comportamiento de produccion).
@@ -1152,6 +1167,32 @@ class SalesForecastModel:
               f"validación interna {acc_val:.1%}; {n_si:,} de {len(res):,} "
               f"productos se venderán")
 
+    # ── 7d. RESUMEN POR GRUPO DE PRODUCTO (suma de predicciones) ─────────────
+    def agregar_resumen_grupo(self):
+        """
+        Construye self.resumen_grupos: por grupo de producto (catalogo
+        grupos_path), cuantos productos tienen monto predicho, cuantos
+        probablemente se venderan, la suma de sus predicciones, sus ventas del
+        mes anterior, la variacion y el porcentaje del total. Es la variante G0
+        del experimento "[Experimento] Predicción mensual por grupo". No
+        modifica self.results ni el CSV. Si el catalogo no existe, todos los
+        productos quedan en "Sin grupo". Con resumen_por_grupo=False no hace
+        nada.
+        """
+        if not self.resumen_por_grupo:
+            return
+        c = self._c
+        if self.grupos_path.exists():
+            mapa = grupos.cargar_mapa(self.grupos_path)
+        else:
+            print(f"[!] Sin catálogo de grupos ({self.grupos_path}): "
+                  f"todos los productos quedan en 'Sin grupo'")
+            mapa = pd.Series(dtype=object)
+        self.mapa_grupos = mapa
+        self.resumen_grupos = grupos.resumen_grupos(
+            self.results, mapa, c("id"), c("total_sold"))
+        print(f"[✓] Resumen por grupo: {len(self.resumen_grupos):,} grupos")
+
     # ── 8. VISUALIZACIÓN ─────────────────────────────────────────────────────
     def plot(self, product_id=None):
         c = self._c
@@ -1218,6 +1259,7 @@ class SalesForecastModel:
         self.predict_next_month()
         self.estimar_por_promedio()
         self.agregar_probabilidad_venta()
+        self.agregar_resumen_grupo()
         self.plot()
         return self.results
 

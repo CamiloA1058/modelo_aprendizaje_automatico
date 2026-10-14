@@ -141,3 +141,58 @@ def resumen_mes(mes, tabla, real_top_total=None):
         "MAE promedio (COP)": (float((prom[real] - prom[pred]).abs().mean())
                                if len(prom) else float("nan")),
     }
+
+
+# ── Vista por grupo de producto ──────────────────────────────────────────────
+COLUMNAS_GRUPO = ["Grupo", "Productos", "Predicción (COP)", "Real (COP)",
+                  "Diferencia (real − predicción)", "Acierto %"]
+
+
+def tabla_grupos_mes(tabla, mapa):
+    """Una fila por grupo con los productos que muestra el dashboard (los que
+    tienen monto predicho, modelo y promedio): prediccion = suma de las
+    predicciones por producto (G0), real = suma de lo vendido por esos mismos
+    productos, diferencia y acierto 1 - |R-P|/R recortado a [0, 1] (vacio si
+    el real es 0). Ordenada por la prediccion del grupo."""
+    from ventas_forecast import grupos as gr
+    pred_col, real_col = "Predicción combinada (COP)", "Real del mes (COP)"
+    t = tabla[tabla[pred_col].notna()]
+    grupo = pd.Series(gr.asignar_grupo(t["Código"], mapa), index=t.index)
+    grupo = grupo.where(grupo != gr.SIN_GRUPO, gr.ETIQUETA_SIN_GRUPO)
+    g = pd.DataFrame({"grupo": grupo, "n": 1, "pred": t[pred_col].astype(float),
+                      "real": t[real_col].astype(float)}).groupby("grupo").sum()
+    out = pd.DataFrame({
+        "Grupo": g.index,
+        "Productos": g["n"].to_numpy(int),
+        "Predicción (COP)": g["pred"].to_numpy(float),
+        "Real (COP)": g["real"].to_numpy(float),
+    })
+    out["Diferencia (real − predicción)"] = out["Real (COP)"] - out["Predicción (COP)"]
+    out["Acierto %"] = gr.exactitud_grupo(out["Real (COP)"], out["Predicción (COP)"])
+    out = out.sort_values("Predicción (COP)", ascending=False, kind="stable")
+    return out.reset_index(drop=True)[COLUMNAS_GRUPO]
+
+
+def resumen_grupos(tablas):
+    """Acierto ponderado por valor (1 - sum|R-P| / sum R sobre los grupos) de
+    cada mes y de todos los meses apilados ('Agrupado'). 'tablas' es
+    {mes: tabla_grupos_mes}."""
+    filas, todas = [], []
+    for mes, t in tablas.items():
+        filas.append(_fila_grupos(mes, t))
+        todas.append(t)
+    if todas:
+        filas.append(_fila_grupos("Agrupado", pd.concat(todas, ignore_index=True)))
+    return pd.DataFrame(filas)
+
+
+def _fila_grupos(mes, t):
+    p, r = t["Predicción (COP)"].to_numpy(float), t["Real (COP)"].to_numpy(float)
+    return {
+        "Mes": mes,
+        "Grupos": int(len(t)),
+        "Predicción (COP)": float(p.sum()),
+        "Real (COP)": float(r.sum()),
+        "Acierto ponderado": (float(1.0 - np.abs(r - p).sum() / r.sum())
+                              if r.sum() else float("nan")),
+    }
