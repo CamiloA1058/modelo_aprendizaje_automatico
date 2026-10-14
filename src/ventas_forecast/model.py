@@ -41,6 +41,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
 )
 
+from ventas_forecast import eligibility as el
 from ventas_forecast import improvements as im
 from ventas_forecast.data.cleaning import remove_bulk_adjustments
 from ventas_forecast.paths import DEFAULT_PREDICTION
@@ -118,6 +119,12 @@ class SalesForecastModel:
                           por el negocio el caso del 19/02/2026). Default
                           100 (conservador, ver CHANGELOG 2026-09-23
                           "Limpieza"). None desactiva la regla.
+    elegibilidad_ampliada : EXPERIMENTAL, desactivado por defecto (produccion no
+                          cambia). Si es True, tambien se entrenan y se
+                          predicen productos SIN ventas en el ultimo mes pero
+                          con media_3 > 0 (ver ventas_forecast.eligibility);
+                          su razon de crecimiento y su clase usan media_3
+                          como base del mes actual.
     """
 
     def __init__(
@@ -138,6 +145,7 @@ class SalesForecastModel:
         min_months=6,
         clf_params=None,
         bulk_adjustment_min_products=100,
+        elegibilidad_ampliada=False,
     ):
         self.filepath        = Path(filepath)
         self.sep             = sep
@@ -158,6 +166,7 @@ class SalesForecastModel:
         self.min_months      = min_months
         self.clf_params      = {**DEFAULT_CLF_PARAMS, **(clf_params or {})}
         self.bulk_adjustment_min_products = bulk_adjustment_min_products
+        self.elegibilidad_ampliada = elegibilidad_ampliada
         # Opcional (solo experimentos): funcion que recibe los meses actuales
         # (fecha) de las filas de entrenamiento y devuelve sus pesos de
         # muestra. None = sin pesos (comportamiento de produccion).
@@ -402,6 +411,9 @@ class SalesForecastModel:
         """
         c = self._c
 
+        if self.elegibilidad_ampliada:
+            return self._build_train_frame_ampliada()
+
         df_train = self.df[
             self.df["target"].notna() &
             (self.df[c("total_sold")] > 0)
@@ -414,6 +426,26 @@ class SalesForecastModel:
             train_idx += g.index[:cut].tolist()
             test_idx  += g.index[cut:].tolist()
 
+        return df_train, train_idx, test_idx
+
+    def _build_train_frame_ampliada(self):
+        """Variante experimental de _build_train_frame (elegibilidad_ampliada):
+        agrega las filas con mes actual en cero y media_3 > 0. Las filas de
+        produccion se parten exactamente igual (ver
+        eligibility.temporal_train_mask)."""
+        c = self._c
+        mask = el.training_mask(
+            self.df[c("total_sold")], self.df["media_3_actual"],
+            self.df["target"], True)
+        df_train = self.df[mask].copy().reset_index(drop=True)
+        is_base = (df_train[c("total_sold")] > 0).to_numpy()
+        train_idx, test_idx = [], []
+        for _, g in df_train.groupby(c("id")):
+            g = g.sort_values("fecha")
+            en_train = el.temporal_train_mask(is_base[g.index.to_numpy()],
+                                              self.train_ratio)
+            train_idx += g.index[en_train].tolist()
+            test_idx  += g.index[~en_train].tolist()
         return df_train, train_idx, test_idx
 
     # ── 3. CLUSTERING ─────────────────────────────────────────────────────────
@@ -508,6 +540,11 @@ class SalesForecastModel:
 
         # ── Dataset de entrenamiento (mismo filtro y split que cluster()) ────
         df_train, train_idx, test_idx = self._build_train_frame()
+        if self.elegibilidad_ampliada:
+            # Base de la decision: mes actual si hubo ventas; si no, media_3.
+            df_train["growth_ratio"] = el.growth_ratio_base(
+                df_train["target"], df_train[c("total_sold")],
+                df_train["media_3_actual"])
 
         # Target en 3 clases:
         #   2 = Reforzar  (growth_ratio > growth_threshold)
@@ -545,11 +582,19 @@ class SalesForecastModel:
         )
         prods_ok = conteo[conteo >= self.min_months].index
 
-        df_pred = self.df[
-            (self.df["fecha"] == self._ultimo_mes) &
-            (self.df[c("id")].isin(prods_ok)) &
-            (self.df[c("total_sold")] > 0)
-        ].copy()
+        if self.elegibilidad_ampliada:
+            df_pred = self.df[
+                (self.df["fecha"] == self._ultimo_mes) &
+                el.prediction_mask(
+                    self.df[c("total_sold")], self.df["media_3_actual"],
+                    self.df[c("id")].isin(prods_ok), True)
+            ].copy()
+        else:
+            df_pred = self.df[
+                (self.df["fecha"] == self._ultimo_mes) &
+                (self.df[c("id")].isin(prods_ok)) &
+                (self.df[c("total_sold")] > 0)
+            ].copy()
 
         # Calcular features del mes siguiente (el lag_1 es el mes actual)
         # Para predecir abril: lag_1=marzo, lag_2=feb, lag_3=ene, lag_6=oct
