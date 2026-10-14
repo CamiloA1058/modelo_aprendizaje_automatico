@@ -214,7 +214,7 @@
         <span id="mes-banner-text">Predicción para —</span>
       </div>
 
-      <div class="kpi-grid" style="grid-template-columns:repeat(6,1fr)">
+      <div class="kpi-grid" style="grid-template-columns:repeat(7,1fr)">
         <div class="kpi blue">
           <div class="kpi-label">Productos con decisión</div>
           <div class="kpi-value" id="kpi-total">—</div>
@@ -239,6 +239,11 @@
           <div class="kpi-label">Sin recomendación</div>
           <div class="kpi-value" id="kpi-sinrec">—</div>
           <div class="kpi-sub">estimación por promedio (sin venta el último mes)</div>
+        </div>
+        <div class="kpi green" id="kpi-venta-box">
+          <div class="kpi-label">Probablemente se venderán</div>
+          <div class="kpi-value" id="kpi-venta" style="font-size:20px">—</div>
+          <div class="kpi-sub" id="kpi-venta-sub">Probabilidad de venta del mes</div>
         </div>
         <div class="kpi amber">
           <div class="kpi-label">Ventas predichas</div>
@@ -283,7 +288,7 @@
             <thead><tr>
               <th>Código</th><th>Descripción</th>
               <th>Ventas base</th><th>Predicción</th>
-              <th>Prob. reducción</th><th>Decisión</th>
+              <th>Prob. reducción</th><th>Decisión</th><th>Prob. de venta</th><th>Se venderá</th>
             </tr></thead>
             <tbody id="top-risk-body"></tbody>
           </table>
@@ -297,7 +302,7 @@
             <thead><tr>
               <th>Código</th><th>Descripción</th>
               <th>Ventas base</th><th>Predicción</th>
-              <th>Prob. crecimiento</th><th>Decisión</th>
+              <th>Prob. crecimiento</th><th>Decisión</th><th>Prob. de venta</th><th>Se venderá</th>
             </tr></thead>
             <tbody id="top-growth-body"></tbody>
           </table>
@@ -322,8 +327,14 @@
         <option value="Reducir stock">Reducir stock</option>
         <option value="Sin recomendación (estimación por promedio)">Sin recomendación (estimación por promedio)</option>
       </select>
+      <select id="filter-venta" onchange="filterProducts()">
+        <option value="">Todos (se venderá o no)</option>
+        <option value="Sí">Se venderá</option>
+        <option value="No">No se venderá</option>
+      </select>
       <select id="sort-by" onchange="filterProducts()">
         <option value="prob">Ordenar: probabilidad</option>
+        <option value="venta_prob">Ordenar: probabilidad de venta</option>
         <option value="ventas">Ordenar: ventas predichas</option>
         <option value="codigo">Ordenar: código</option>
       </select>
@@ -343,10 +354,11 @@
             <th>Predicción <small id="th-mes" style="font-size:9px;font-weight:400"></small></th>
             <th>Variación</th>
             <th>Prob. crecimiento</th>
+            <th>Prob. de venta</th><th>Se venderá</th>
             <th>Decisión</th><th>Seg.</th>
           </tr></thead>
           <tbody id="products-body">
-            <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
+            <tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
           </tbody>
         </table>
       </div>
@@ -436,7 +448,7 @@
 
 <script>
 // ── Estado ─────────────────────────────────────────────────────────────────
-let _page = 1, _query = '', _decision = '', _sortBy = 'prob';
+let _page = 1, _query = '', _decision = '', _venta = '', _sortBy = 'prob';
 let _polling = null, _selectedFile = null;
 let _chartHist = null, _chartDonut = null, _chartDetail = null;
 
@@ -577,6 +589,15 @@ async function loadSummary() {
   document.getElementById('kpi-reducir').textContent  = fmt(d.reducir);
   document.getElementById('kpi-pred').textContent     = COP(d.pred_total);
   document.getElementById('kpi-sinrec').textContent   = fmt(d.n_promedio || 0);
+  if (d.n_se_vendera != null) {
+    document.getElementById('kpi-venta').textContent = `${fmt(d.n_se_vendera)} de ${fmt(d.n_con_prob_venta)}`;
+    document.getElementById('kpi-venta-sub').textContent =
+      `productos · umbral ${Math.round((d.sale_threshold || 0) * 100)}%` +
+      (d.sale_val_accuracy != null ? ` · acierto en validación ${Math.round(d.sale_val_accuracy * 100)}%` : '');
+  } else {
+    document.getElementById('kpi-venta').textContent = '—';
+    document.getElementById('kpi-venta-sub').textContent = 'Sin probabilidad de venta en estos resultados';
+  }
 
   const pctRef = d.total ? Math.round(d.reforzar / d.total * 100) : 0;
   const pctMan = d.total ? Math.round(d.mantener / d.total * 100) : 0;
@@ -707,6 +728,8 @@ function renderTopRisk(rows) {
         </div>
       </td>
       <td>${decisionBadge(r.decision)}</td>
+      <td>${probVentaHtml(r)}</td>
+      <td>${ventaBadge(r.se_vendera)}</td>
     </tr>`).join('');
 }
 
@@ -724,7 +747,23 @@ function renderTopGrowth(rows) {
         </div>
       </td>
       <td>${decisionBadge(r.decision)}</td>
+      <td>${probVentaHtml(r)}</td>
+      <td>${ventaBadge(r.se_vendera)}</td>
     </tr>`).join('');
+}
+
+function probVentaHtml(r) {
+  if (r.prob_venta == null || r.se_vendera == null) return '<span style="color:var(--muted)">—</span>';
+  return `<div class="prob-wrap">
+          <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_venta*100)}%;background:var(--accent)"></div></div>
+          <span class="prob-val">${Math.round(r.prob_venta*100)}%</span>
+        </div>`;
+}
+
+function ventaBadge(v) {
+  if (v === 'Sí') return '<span class="badge green">Se venderá: Sí</span>';
+  if (v === 'No') return '<span class="badge gray">Se venderá: No</span>';
+  return '<span style="color:var(--muted)">—</span>';
 }
 
 function decisionBadge(d) {
@@ -738,6 +777,7 @@ function decisionBadge(d) {
 function filterProducts() {
   _query    = document.getElementById('search-input').value;
   _decision = document.getElementById('filter-decision').value;
+  _venta    = document.getElementById('filter-venta').value;
   _sortBy   = document.getElementById('sort-by').value;
   _page = 1;
   loadProducts();
@@ -748,7 +788,7 @@ function changePage(dir) {
 }
 
 async function loadProducts() {
-  const params = new URLSearchParams({ q: _query, decision: _decision, page: _page, size: 50, sort: _sortBy });
+  const params = new URLSearchParams({ q: _query, decision: _decision, venta: _venta, page: _page, size: 50, sort: _sortBy });
   const d = await apiGet('/api/products?' + params);
   if (!d.ok) return;
 
@@ -765,7 +805,7 @@ async function loadProducts() {
 
   const tbody = document.getElementById('products-body');
   if (!d.data || !d.data.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
     return;
   }
 
@@ -788,6 +828,8 @@ async function loadProducts() {
           <span class="prob-val">${Math.round(r.prob_crecimiento*100)}%</span>
         </div>`}
       </td>
+      <td>${probVentaHtml(r)}</td>
+      <td>${ventaBadge(r.se_vendera)}</td>
       <td>${decisionBadge(r.decision)}</td>
       <td><span class="badge gray">${r.cluster}</span></td>
     </tr>`;
@@ -842,6 +884,13 @@ async function openDetail(codigo) {
         <div class="kpi-sub">Segmento ${p.cluster}</div>`}
       </div>
     </div>
+
+    ${p.prob_venta != null && p.se_vendera != null ? `
+    <div style="display:flex;align-items:center;gap:12px;margin:-8px 0 22px;font-size:13px;">
+      <span style="color:var(--muted)">Probabilidad de venta</span>
+      <strong>${Math.round(p.prob_venta * 100)}%</strong>
+      ${ventaBadge(p.se_vendera)}
+    </div>` : ''}
 
     <div class="section-title" style="margin-bottom:8px;">Historial de ventas</div>
     <div style="position:relative;height:220px;margin-bottom:22px;">

@@ -76,6 +76,8 @@ def _run_model(filepath, col_map, params):
             min_months=int(params.get("min_months", 6)),
             estimacion_por_promedio=str(
                 params.get("estimacion_por_promedio", "true")).lower() != "false",
+            probabilidad_venta=str(
+                params.get("probabilidad_venta", "true")).lower() != "false",
         )
 
         _log("✔ Cargando y limpiando datos…")
@@ -108,6 +110,12 @@ def _run_model(filepath, col_map, params):
 
         _log("✔ Estimando por promedio los productos sin ventas el último mes…")
         model.estimar_por_promedio()
+
+        if model.probabilidad_venta:
+            _log("✔ Calculando la probabilidad de venta de cada producto…")
+            model.agregar_probabilidad_venta()
+            _log(f"  → Umbral {model.sale_threshold:.2f} | exactitud de validación "
+                 f"interna {model.sale_val_accuracy:.1%}")
 
         _state["model"]        = model
         _state["results"]      = model.results
@@ -209,11 +217,17 @@ def api_summary():
     hist["fecha"] = hist["fecha"].astype(str)
     hist_list = hist.tail(18).to_dict(orient="records")
 
+    # Probabilidad de venta (todos los productos, modelo y promedio)
+    tiene_venta = "se_vendera" in df.columns
+    n_se_vendera = int((df["se_vendera"] == "Sí").sum()) if tiene_venta else None
+    n_con_prob_venta = int(df["prob_venta"].notna().sum()) if tiene_venta else None
+
     # Métricas del modelo
     metricas = model.metrics
 
-    cols_pred = [pred_col] + (["ventas_predichas_rf"]
-                              if "ventas_predichas_rf" in df.columns else [])
+    cols_pred = ([pred_col]
+                 + (["ventas_predichas_rf"] if "ventas_predichas_rf" in df.columns else [])
+                 + (["prob_venta", "se_vendera"] if tiene_venta else []))
     df = df_mod
 
     # Top productos por probabilidad de crecimiento
@@ -259,6 +273,10 @@ def api_summary():
         "pred_total_modelo":   round(pred_total_modelo, 0),
         "pred_total_promedio": round(pred_total_promedio, 0),
         "n_promedio":  n_prom,
+        "n_se_vendera": n_se_vendera,
+        "n_con_prob_venta": n_con_prob_venta,
+        "sale_threshold": getattr(model, "sale_threshold", None),
+        "sale_val_accuracy": getattr(model, "sale_val_accuracy", None),
         "blend_weight": blend_weight,
         "base_total":  round(base_total, 0),
         "variacion":   round(variacion, 1),
@@ -284,7 +302,8 @@ def api_products():
     dec      = request.args.get("decision", "")
     page     = int(request.args.get("page", 1))
     size     = int(request.args.get("size", 50))
-    sort_by  = request.args.get("sort", "prob")   # prob | ventas | codigo
+    sort_by  = request.args.get("sort", "prob")   # prob | ventas | codigo | venta_prob
+    venta    = request.args.get("venta", "")      # "Sí" | "No" (se_vendera)
 
     out = df.copy().rename(columns={
         c("id"):          "CODIGO",
@@ -304,11 +323,14 @@ def api_products():
         ]
     if dec:
         out = out[out["decision"] == dec]
+    if venta and "se_vendera" in out.columns:
+        out = out[out["se_vendera"] == venta]
 
     sort_map = {
         "prob":   ("prob_crecimiento", False),
         "ventas": ("ventas_predichas", False),
         "codigo": ("CODIGO", True),
+        "venta_prob": ("prob_venta", False),
     }
     col_s, asc = sort_map.get(sort_by, ("prob_crecimiento", False))
     if col_s in out.columns:
