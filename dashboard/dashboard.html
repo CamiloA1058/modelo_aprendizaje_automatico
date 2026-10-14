@@ -624,7 +624,7 @@ function renderHistChart(historial, pred_total, mes_predicho) {
           pointRadius: 3, pointBackgroundColor: '#1A1916',
         },
         {
-          label: esProm ? 'Estimación por promedio' : 'Predicción (modelo combinado)',
+          label: 'Predicción (modelo combinado + estimación por promedio)',
           data: predData,
           borderColor: '#1D4ED8',
           backgroundColor: 'rgba(29,78,216,.1)',
@@ -882,7 +882,7 @@ async function openDetail(codigo) {
       labels: fechas,
       datasets: [
         { label: 'Ventas reales', data: [...reales, null], borderColor: '#1A1916', tension: .3, pointRadius: 4, pointBackgroundColor: '#1A1916', fill: false },
-        { label: 'Predicción (modelo combinado)', data: predArr, borderColor: '#1D4ED8', borderDash: [5,3], tension: 0, pointRadius: 7, pointBackgroundColor: '#1D4ED8', fill: false, spanGaps: false }
+        { label: esProm ? 'Estimación por promedio' : 'Predicción (modelo combinado)', data: predArr, borderColor: '#1D4ED8', borderDash: [5,3], tension: 0, pointRadius: 7, pointBackgroundColor: '#1D4ED8', fill: false, spanGaps: false }
       ]
     },
     options: {
