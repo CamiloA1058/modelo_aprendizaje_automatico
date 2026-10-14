@@ -74,7 +74,10 @@
   td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   tr:last-child td { border-bottom: none; }
   tbody tr:hover td { background: var(--bg); cursor: pointer; }
-  #page-productos td, #page-productos th { padding-left: 8px; padding-right: 8px; }
+  #page-productos td, #page-productos th { padding-left: 6px; padding-right: 6px; }
+  #page-productos .desc { max-width: 100px; }
+  #page-productos .prob-bar { min-width: 22px; }
+  #page-productos .prob-wrap { gap: 5px; }
   .codigo { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
   .desc { font-weight: 500; max-width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -292,7 +295,7 @@
           <table>
             <thead><tr>
               <th>Código</th><th>Descripción</th>
-              <th>Ventas base</th><th>Predicción</th><th title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
+              <th>Ventas base</th><th>Predicción</th><th style="white-space:normal;line-height:1.25;min-width:72px;" title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
               <th>Prob. reducción</th><th>Decisión</th><th>Prob. venta</th><th>Se venderá</th>
             </tr></thead>
             <tbody id="top-risk-body"></tbody>
@@ -306,7 +309,7 @@
           <table>
             <thead><tr>
               <th>Código</th><th>Descripción</th>
-              <th>Ventas base</th><th>Predicción</th><th title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
+              <th>Ventas base</th><th>Predicción</th><th style="white-space:normal;line-height:1.25;min-width:72px;" title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
               <th>Prob. crecimiento</th><th>Decisión</th><th>Prob. venta</th><th>Se venderá</th>
             </tr></thead>
             <tbody id="top-growth-body"></tbody>
@@ -343,7 +346,7 @@
             <th>Ventas mes anterior</th>
             <th>Variación</th>
             <th>% del total</th>
-            <th title="Suma del stock sugerido de los productos del grupo (nivel de servicio 70 % por producto)">Stock sugerido (70 %)</th>
+            <th title="Suma del stock sugerido de los productos del grupo (70 % por producto). Como cada producto se cubre por separado, la suma suele quedar por encima de lo que el grupo vende en total">Stock sugerido (70 %)</th>
           </tr></thead>
           <tbody id="grupos-body">
             <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
@@ -401,7 +404,7 @@
             <th>Ventas <small style="font-size:9px;font-weight:400">mes base</small></th>
             <th>Predicción <small id="th-mes" style="font-size:9px;font-weight:400"></small></th>
             <th>Variación</th>
-            <th title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
+            <th style="white-space:normal;line-height:1.25;min-width:72px;" title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
             <th>Prob. crecimiento</th>
             <th title="Probabilidad de venta">Prob. de venta</th><th>Se venderá</th>
             <th>Decisión</th><th>Seg.</th>
@@ -862,7 +865,8 @@ function stockHtml(r) {
   if (r.stock_sugerido == null) return '<span style="color:var(--muted)">—</span>';
   const u = r.stock_sugerido_unidades != null
     ? `<div style="font-size:10px;color:var(--muted)">${fmt(r.stock_sugerido_unidades)} uds</div>` : '';
-  return `<span style="font-weight:600">${COP(r.stock_sugerido)}</span>${u}`;
+  const monto = r.stock_sugerido > 0 ? COP(r.stock_sugerido) : '$0';
+  return `<span style="font-weight:600">${monto}</span>${u}`;
 }
 
 function probVentaHtml(r) {
