@@ -9,7 +9,7 @@ Uso (la base se abre con el cliente Firebird embebido, sin servidor):
 
     set FIREBIRD_CLIENT=C:\ruta\fbclient.dll
     python sql/extraer_ventas.py --db copia.fdb --sql sql/extraccion_ventas_v6.sql \
-        --out data/raw/Query_Result_V6.csv --desde 2024-01-01 --hasta 2026-03-27
+        --out data/raw/Query_Result_V6.csv --desde 2024-01-01 --hasta 2026-03-31
 
 Variables de entorno: FIREBIRD_CLIENT (o --fbclient), FIREBIRD_USER (por defecto
 SYSDBA), FIREBIRD_PASSWORD (opcional con el cliente embebido). Nunca se escriben

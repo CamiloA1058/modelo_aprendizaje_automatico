@@ -75,12 +75,12 @@ class TestEscrituraCsv(unittest.TestCase):
 class TestParametrosSql(unittest.TestCase):
     def test_reemplaza_rango_de_fechas(self):
         sql = "WHERE d.FECHA BETWEEN '2024-01-01' AND '2026-04-13' AND x"
-        out = ex.apply_date_range(sql, "2024-02-01", "2026-03-27")
-        self.assertIn("BETWEEN '2024-02-01' AND '2026-03-27'", out)
+        out = ex.apply_date_range(sql, "2024-02-01", "2026-03-31")
+        self.assertIn("BETWEEN '2024-02-01' AND '2026-03-31'", out)
 
     def test_rechaza_fecha_mal_formada(self):
         with self.assertRaises(ValueError):
-            ex.apply_date_range("d.FECHA BETWEEN '2024-01-01' AND '2026-04-13'", "01/02/2024", "2026-03-27")
+            ex.apply_date_range("d.FECHA BETWEEN '2024-01-01' AND '2026-04-13'", "01/02/2024", "2026-03-31")
 
     def test_falla_si_no_hay_rango(self):
         with self.assertRaises(ValueError):
@@ -110,8 +110,8 @@ class TestConsultaV6(unittest.TestCase):
         self.assertNotIn("'143'", self.sql)
 
     def test_rango_de_fechas_sigue_reemplazable(self):
-        out = ex.apply_date_range(self.sql, "2026-03-28", "2026-09-30")
-        self.assertIn("BETWEEN '2026-03-28' AND '2026-09-30'", out)
+        out = ex.apply_date_range(self.sql, "2026-04-01", "2026-09-30")
+        self.assertIn("BETWEEN '2026-04-01' AND '2026-09-30'", out)
 
 
 if __name__ == "__main__":

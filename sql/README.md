@@ -42,7 +42,7 @@ Firebird embebido (`fbclient.dll`, sin servidor) y el paquete `firebird-driver`
 
 ```bash
 export FIREBIRD_CLIENT=/ruta/a/fbclient.dll   # usuario: FIREBIRD_USER (SYSDBA); clave opcional: FIREBIRD_PASSWORD
-python sql/extraer_ventas.py --db copia.fdb --sql sql/extraccion_ventas_v6.sql     --out data/raw/Query_Result_V6.csv --desde 2024-01-01 --hasta 2026-03-27
+python sql/extraer_ventas.py --db copia.fdb --sql sql/extraccion_ventas_v6.sql     --out data/raw/Query_Result_V6.csv --desde 2024-01-01 --hasta 2026-03-31
 ```
 
 El extractor reemplaza el rango de `d.FECHA` del `.sql` por `--desde/--hasta` y
