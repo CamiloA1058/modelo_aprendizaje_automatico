@@ -214,11 +214,11 @@
         <span id="mes-banner-text">Predicción para —</span>
       </div>
 
-      <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr)">
+      <div class="kpi-grid" style="grid-template-columns:repeat(6,1fr)">
         <div class="kpi blue">
-          <div class="kpi-label">Productos predichos</div>
+          <div class="kpi-label">Productos con decisión</div>
           <div class="kpi-value" id="kpi-total">—</div>
-          <div class="kpi-sub">con ≥6 meses de historial</div>
+          <div class="kpi-sub">modelo, con ≥6 meses de historial</div>
         </div>
         <div class="kpi green">
           <div class="kpi-label">Reforzar stock</div>
@@ -235,6 +235,11 @@
           <div class="kpi-value" id="kpi-reducir">—</div>
           <div class="kpi-sub" id="kpi-reducir-pct">—</div>
         </div>
+        <div class="kpi" id="kpi-sinrec-box">
+          <div class="kpi-label">Sin recomendación</div>
+          <div class="kpi-value" id="kpi-sinrec">—</div>
+          <div class="kpi-sub">estimación por promedio (sin venta el último mes)</div>
+        </div>
         <div class="kpi amber">
           <div class="kpi-label">Ventas predichas</div>
           <div class="kpi-value" id="kpi-pred" style="font-size:20px">—</div>
@@ -247,7 +252,7 @@
           <div class="section-title">Historial de ventas + predicción del próximo mes</div>
           <div class="legend-row">
             <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1A1916"></span>Ventas reales (productos con predicción de monto)</span>
-            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1D4ED8"></span>Predicción próximo mes (modelo combinado)</span>
+            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1D4ED8"></span>Predicción próximo mes (modelo combinado + estimación por promedio)</span>
           </div>
           <div class="chart-wrap" style="height:240px">
             <canvas id="chart-hist" role="img" aria-label="Historial de ventas totales y predicción del próximo mes"></canvas>
@@ -315,6 +320,7 @@
         <option value="Reforzar stock">Reforzar stock</option>
         <option value="Mantener stock">Mantener stock</option>
         <option value="Reducir stock">Reducir stock</option>
+        <option value="Sin recomendación (estimación por promedio)">Sin recomendación (estimación por promedio)</option>
       </select>
       <select id="sort-by" onchange="filterProducts()">
         <option value="prob">Ordenar: probabilidad</option>
@@ -570,6 +576,7 @@ async function loadSummary() {
   document.getElementById('kpi-mantener').textContent = fmt(d.mantener);
   document.getElementById('kpi-reducir').textContent  = fmt(d.reducir);
   document.getElementById('kpi-pred').textContent     = COP(d.pred_total);
+  document.getElementById('kpi-sinrec').textContent   = fmt(d.n_promedio || 0);
 
   const pctRef = d.total ? Math.round(d.reforzar / d.total * 100) : 0;
   const pctMan = d.total ? Math.round(d.mantener / d.total * 100) : 0;
@@ -577,11 +584,11 @@ async function loadSummary() {
   document.getElementById('kpi-reforzar-pct').textContent = pctRef + '% del total analizado';
   document.getElementById('kpi-mantener-pct').textContent = pctMan + '% del total analizado';
   document.getElementById('kpi-reducir-pct').textContent  = pctRed + '% del total analizado';
+  const nProm = d.n_promedio || 0;
+  const wTxt  = d.blend_weight != null ? ` (${Math.round(d.blend_weight * 100)}% modelo)` : '';
   document.getElementById('kpi-variacion').textContent =
-    (d.blend_weight != null
-      ? `Combinación del modelo (${Math.round(d.blend_weight * 100)}%) y el promedio de los últimos 3 meses`
-      : 'Combinación del modelo y el promedio de los últimos 3 meses') +
-    ` · ${fmt(d.con_pred)} productos`;
+    `Modelo combinado${wTxt}: ${COP(d.pred_total_modelo)} (${fmt(d.con_pred_modelo)} productos)` +
+    ` · Estimación por promedio: ${COP(d.pred_total_promedio)} (${fmt(nProm)} productos)`;
 
   renderHistChart(d.historial, d.pred_total, d.mes_predicho);
   renderDonut(d.reforzar, d.mantener, d.reducir);
@@ -617,7 +624,7 @@ function renderHistChart(historial, pred_total, mes_predicho) {
           pointRadius: 3, pointBackgroundColor: '#1A1916',
         },
         {
-          label: 'Predicción (modelo combinado)',
+          label: esProm ? 'Estimación por promedio' : 'Predicción (modelo combinado)',
           data: predData,
           borderColor: '#1D4ED8',
           backgroundColor: 'rgba(29,78,216,.1)',
@@ -723,6 +730,7 @@ function renderTopGrowth(rows) {
 function decisionBadge(d) {
   if (d && d.includes('Reforzar')) return '<span class="badge green">↑ Reforzar stock</span>';
   if (d && d.includes('Reducir'))  return '<span class="badge red">↓ Reducir stock</span>';
+  if (d && d.includes('Sin recomendación')) return '<span class="badge gray">Sin recomendación</span>';
   return '<span class="badge gray">Mantener</span>';
 }
 
@@ -773,10 +781,12 @@ async function loadProducts() {
       <td>${COP(pred)}</td>
       <td>${varia != null ? deltaHtml(varia) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>
-        <div class="prob-wrap">
+        ${r.origen_estimacion === 'promedio'
+          ? '<span style="color:var(--muted)" title="Estimación por promedio de los últimos 3 meses">—</span>'
+          : `<div class="prob-wrap">
           <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_crecimiento*100)}%"></div></div>
           <span class="prob-val">${Math.round(r.prob_crecimiento*100)}%</span>
-        </div>
+        </div>`}
       </td>
       <td>${decisionBadge(r.decision)}</td>
       <td><span class="badge gray">${r.cluster}</span></td>
@@ -795,6 +805,7 @@ async function openDetail(codigo) {
   if (!d.ok) { document.getElementById('detail-content').innerHTML = '<p>Error cargando producto.</p>'; return; }
 
   const p       = d.prediccion;
+  const esProm  = p.origen_estimacion === 'promedio';
   const prob    = Math.round((p.prob_crecimiento || 0) * 100);
   const base    = p.ventas_base || 0;
   const pred    = p.ventas_predichas || 0;
@@ -822,9 +833,13 @@ async function openDetail(codigo) {
         ${predRf != null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;">Solo modelo: ${COP(predRf)}</div>` : ''}
       </div>
       <div class="kpi amber" style="padding:12px 14px;">
-        <div class="kpi-label">Prob. crecimiento</div>
+        ${esProm
+          ? `<div class="kpi-label">Estimación</div>
+        <div class="kpi-value" style="font-size:13px;line-height:1.3;">Estimación por promedio de los últimos 3 meses</div>
+        <div class="kpi-sub">Sin probabilidad · Segmento ${p.cluster}</div>`
+          : `<div class="kpi-label">Prob. crecimiento</div>
         <div class="kpi-value" style="font-size:17px;">${prob}%</div>
-        <div class="kpi-sub">Segmento ${p.cluster}</div>
+        <div class="kpi-sub">Segmento ${p.cluster}</div>`}
       </div>
     </div>
 
@@ -847,7 +862,7 @@ async function openDetail(codigo) {
           <tr style="background:var(--accent-bg);">
             <td style="font-size:12px;font-weight:600;color:var(--accent);">${d.mes_predicho} ★</td>
             <td style="font-weight:600;color:var(--accent);">${COP(pred)}</td>
-            <td colspan="2" style="font-size:12px;color:var(--accent);">Predicción (modelo combinado)</td>
+            <td colspan="2" style="font-size:12px;color:var(--accent);">${esProm ? 'Estimación por promedio de los últimos 3 meses' : 'Predicción (modelo combinado)'}</td>
           </tr>
         </tbody>
       </table>

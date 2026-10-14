@@ -26,7 +26,7 @@ DEFAULT_DATA   = DEFAULT_DATASET
 DEFAULT_OUTPUT = DEFAULT_PREDICTION
 
 # ── Importar modelo ───────────────────────────────────────────────────────────
-from ventas_forecast.model import SalesForecastModel
+from ventas_forecast.model import SalesForecastModel, ETIQUETA_SIN_RECOMENDACION
 
 app = Flask(__name__)
 CORS(app)
@@ -39,6 +39,14 @@ _state = {
     "error":   None,
     "mes_predicho": None,
 }
+
+
+def _es_promedio(df):
+    """Máscara de productos con estimación por promedio (origen_estimacion).
+    Sin la columna (resultados antiguos) todos son del modelo."""
+    if "origen_estimacion" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df["origen_estimacion"] == "promedio"
 
 
 def _log(msg):
@@ -66,6 +74,8 @@ def _run_model(filepath, col_map, params):
             train_ratio=float(params.get("train_ratio", 0.8)),
             numeric_fmt=params.get("numeric_fmt", "dot_comma"),
             min_months=int(params.get("min_months", 6)),
+            estimacion_por_promedio=str(
+                params.get("estimacion_por_promedio", "true")).lower() != "false",
         )
 
         _log("✔ Cargando y limpiando datos…")
@@ -95,6 +105,9 @@ def _run_model(filepath, col_map, params):
 
         _log(f"✔ Generando predicciones para {model._mes_pred.strftime('%Y-%m')}…")
         model.predict_next_month()
+
+        _log("✔ Estimando por promedio los productos sin ventas el último mes…")
+        model.estimar_por_promedio()
 
         _state["model"]        = model
         _state["results"]      = model.results
@@ -154,28 +167,40 @@ def api_summary():
     model = _state["model"]
     c     = model._c
 
-    total     = len(df)
-    reforzar  = int((df["decision"] == "Reforzar stock").sum())
-    reducir   = int((df["decision"] == "Reducir stock").sum())
+    # Los productos con estimación por promedio no tienen decisión del
+    # modelo: las decisiones, la dona y las tablas de probabilidad cuentan
+    # solo los productos del modelo; el total en pesos suma ambos grupos.
+    es_prom  = _es_promedio(df)
+    df_mod   = df[~es_prom]
+    n_prom   = int(es_prom.sum())
+
+    total     = len(df_mod)
+    reforzar  = int((df_mod["decision"] == "Reforzar stock").sum())
+    reducir   = int((df_mod["decision"] == "Reducir stock").sum())
     mantener  = total - reforzar - reducir
-    avg_prob  = float(df["prob_crecimiento"].mean())
+    avg_prob  = float(df_mod["prob_crecimiento"].mean()) if total else 0.0
 
     # Ventas del último mes (base) y predichas
     base_total = float(df[c("total_sold")].sum())
     pred_col   = "ventas_predichas"
     df_con_pred = df[df[pred_col].notna()]
-    # pred_total: suma de la predicción combinada (w*modelo + (1-w)*media de
-    # 3 meses); pred_total_rf: suma del modelo solo, que subestima el total.
-    pred_total     = float(df_con_pred[pred_col].sum()) if len(df_con_pred) else 0.0
-    pred_total_rf  = (float(df_con_pred["ventas_predichas_rf"].sum())
-                      if "ventas_predichas_rf" in df_con_pred.columns else pred_total)
+    mod_con_pred = df_con_pred[~_es_promedio(df_con_pred)]
+    # pred_total_modelo: suma de la predicción combinada (w*modelo + (1-w)*media
+    # de 3 meses) de los productos del modelo; pred_total_promedio: suma de la
+    # media de 3 meses de los productos sin ventas el último mes;
+    # pred_total: ambas; pred_total_rf: el modelo solo, que subestima el total.
+    pred_total_modelo   = float(mod_con_pred[pred_col].sum()) if len(mod_con_pred) else 0.0
+    pred_total_promedio = float(df[es_prom][pred_col].sum()) if n_prom else 0.0
+    pred_total     = pred_total_modelo + pred_total_promedio
+    pred_total_rf  = (float(mod_con_pred["ventas_predichas_rf"].sum())
+                      if "ventas_predichas_rf" in mod_con_pred.columns else pred_total_modelo)
     blend_weight   = getattr(model, "blend_weight", None)
     base_con_pred  = float(df_con_pred[c("total_sold")].sum()) if len(df_con_pred) else 0.0
     variacion      = ((pred_total - base_con_pred) / base_con_pred * 100
                       if base_con_pred > 0 else 0)
 
-    # Historial mensual SOLO de los productos con predicción de monto, para
-    # que la línea y el punto predicho sean comparables.
+    # Historial mensual de los productos con predicción de monto (modelo y
+    # promedio), para que la línea y el punto predicho sean comparables.
     hist = (
         model.df[model.df[c("id")].isin(df_con_pred[c("id")])]
         .groupby("fecha").agg(ventas_reales=(c("total_sold"), "sum"))
@@ -189,6 +214,7 @@ def api_summary():
 
     cols_pred = [pred_col] + (["ventas_predichas_rf"]
                               if "ventas_predichas_rf" in df.columns else [])
+    df = df_mod
 
     # Top productos por probabilidad de crecimiento
     top = (
@@ -230,10 +256,14 @@ def api_summary():
         "avg_prob":    round(avg_prob * 100, 1),
         "pred_total":  round(pred_total, 0),
         "pred_total_rf": round(pred_total_rf, 0),
+        "pred_total_modelo":   round(pred_total_modelo, 0),
+        "pred_total_promedio": round(pred_total_promedio, 0),
+        "n_promedio":  n_prom,
         "blend_weight": blend_weight,
         "base_total":  round(base_total, 0),
         "variacion":   round(variacion, 1),
         "con_pred":    len(df_con_pred),
+        "con_pred_modelo": len(mod_con_pred),
         "historial":   hist_list,
         "metricas":    metricas,
         "top_growth":  top,
@@ -263,6 +293,8 @@ def api_products():
         c("frequency"):   "FRECUENCIA",
         c("avg_price"):   "PRECIO_PROMEDIO",
     })
+    if "origen_estimacion" not in out.columns:
+        out["origen_estimacion"] = "modelo"
     out = out.fillna(0)
 
     if q:
@@ -320,6 +352,11 @@ def api_product(codigo):
 
     pred = pred_row.iloc[0].to_dict()
     pred = {k: (0 if (isinstance(v, float) and np.isnan(v)) else v) for k, v in pred.items()}
+    pred.setdefault("origen_estimacion", "modelo")
+    if pred["origen_estimacion"] == "promedio":
+        # Estimación por promedio: sin probabilidades ni monto del modelo.
+        for k in ("prob_crecimiento", "prob_reduccion", "ventas_predichas_rf"):
+            pred[k] = None
     # El panel de detalle lee las ventas del último mes como `ventas_base`,
     # igual que las tablas del resumen.
     pred["ventas_base"] = pred.get(c("total_sold"), 0)

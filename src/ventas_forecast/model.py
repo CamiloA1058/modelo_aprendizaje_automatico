@@ -69,6 +69,8 @@ DEFAULT_COL_MAP = {
 # de nuevo tras excluir los ajustes masivos de inventario (ver CHANGELOG
 # 2026-09-23 "Limpieza"): min_samples_leaf pasa de 5 a 3 (n_estimators y
 # max_depth no cambian).
+ETIQUETA_SIN_RECOMENDACION = "Sin recomendación (estimación por promedio)"
+
 DEFAULT_CLF_PARAMS = {
     "n_estimators": 300,
     "max_depth": 14,
@@ -125,6 +127,15 @@ class SalesForecastModel:
                           con media_3 > 0 (ver ventas_forecast.eligibility);
                           su razon de crecimiento y su clase usan media_3
                           como base del mes actual.
+    estimacion_por_promedio : True por defecto (produccion). Tras
+                          predict_next_month(), estimar_por_promedio() agrega
+                          los productos sin ventas el ultimo mes con
+                          media_3 > 0, >= min_months meses con ventas y dentro
+                          de los top productos del regresor: su monto es la
+                          media_3 (no una prediccion del modelo) y su decision
+                          es "Sin recomendación (estimación por promedio)".
+                          No cambia el entrenamiento. Con False la salida es
+                          la de antes del paso.
     """
 
     def __init__(
@@ -146,6 +157,7 @@ class SalesForecastModel:
         clf_params=None,
         bulk_adjustment_min_products=100,
         elegibilidad_ampliada=False,
+        estimacion_por_promedio=True,
     ):
         self.filepath        = Path(filepath)
         self.sep             = sep
@@ -167,6 +179,7 @@ class SalesForecastModel:
         self.clf_params      = {**DEFAULT_CLF_PARAMS, **(clf_params or {})}
         self.bulk_adjustment_min_products = bulk_adjustment_min_products
         self.elegibilidad_ampliada = elegibilidad_ampliada
+        self.estimacion_por_promedio = estimacion_por_promedio
         # Opcional (solo experimentos): funcion que recibe los meses actuales
         # (fecha) de las filas de entrenamiento y devuelve sus pesos de
         # muestra. None = sin pesos (comportamiento de produccion).
@@ -997,6 +1010,59 @@ class SalesForecastModel:
         print(f"    {len(self.results):,} productos con predicción para "
               f"{self._mes_pred.strftime('%Y-%m')}")
 
+    # ── 7b. ESTIMACIÓN POR PROMEDIO (productos sin venta el último mes) ──────
+    def estimar_por_promedio(self):
+        """
+        Agrega a self.results los productos que NO vendieron en el último mes
+        pero tienen media_3 > 0 (media de los últimos 3 meses, la misma de la
+        elegibilidad ampliada), al menos min_months meses con ventas y están
+        entre los top productos del regresor. Su monto (ventas_predichas) es
+        media_3; ventas_predichas_rf, prob_crecimiento y prob_reduccion quedan
+        en NaN y su decisión es ETIQUETA_SIN_RECOMENDACION: el clasificador no
+        supera a la clase mayoritaria en estos productos (ver CHANGELOG
+        "[Experimento] Elegibilidad ampliada"), por eso no se usa. El
+        entrenamiento no se toca. Agrega la columna origen_estimacion
+        ("modelo" / "promedio") y vuelve a exportar el CSV. Con
+        estimacion_por_promedio=False no hace nada.
+        """
+        if not self.estimacion_por_promedio:
+            return
+        c = self._c
+        ultimo = self.df[self.df["fecha"] == self._ultimo_mes]
+        conteo = (self.df[self.df[c("total_sold")] > 0]
+                  .groupby(c("id"))["fecha"].count())
+        prods_ok = conteo[conteo >= self.min_months].index
+        sel = ultimo[
+            (ultimo[c("total_sold")] <= 0) &
+            (ultimo["media_3_actual"] > 0) &
+            ultimo[c("id")].isin(prods_ok) &
+            ultimo[c("id")].isin(self._top_prods)
+        ]
+        nuevos = pd.DataFrame(index=sel.index)
+        nuevos[c("id")] = sel[c("id")]
+        nuevos[c("description")] = sel[c("description")]
+        nuevos["mes_predicho"] = self._mes_pred.strftime("%Y-%m")
+        nuevos[c("total_sold")] = sel[c("total_sold")]
+        nuevos["ventas_predichas"] = sel["media_3_actual"]
+        nuevos["ventas_predichas_rf"] = np.nan
+        nuevos["prob_crecimiento"] = np.nan
+        nuevos["prob_reduccion"] = np.nan
+        nuevos["decision"] = ETIQUETA_SIN_RECOMENDACION
+        nuevos["cluster"] = sel["cluster"]
+        nuevos[c("frequency")] = sel[c("frequency")]
+        nuevos[c("avg_price")] = sel[c("avg_price")]
+
+        modelo = self.results.copy()
+        modelo["origen_estimacion"] = "modelo"
+        nuevos["origen_estimacion"] = "promedio"
+        nuevos = nuevos[[col for col in modelo.columns if col in nuevos.columns]]
+        self.results = pd.concat([modelo, nuevos])
+
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.results.to_csv(self.output_path, index=False)
+        print(f"[✓] Estimación por promedio: {len(nuevos):,} productos sin "
+              f"ventas el último mes (monto = media de 3 meses, sin decisión)")
+
     # ── 8. VISUALIZACIÓN ─────────────────────────────────────────────────────
     def plot(self, product_id=None):
         c = self._c
@@ -1061,6 +1127,7 @@ class SalesForecastModel:
         self.train_classifier()
         self.train_regressor()
         self.predict_next_month()
+        self.estimar_por_promedio()
         self.plot()
         return self.results
 
