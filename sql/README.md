@@ -5,7 +5,7 @@ Consultas contra la base de datos Firebird del sistema de inventario
 
 | Archivo | Contenido |
 |---------|-----------|
-| `extraccion_ventas_v6.sql` | Consulta vigente. Igual que la V5 pero solo facturas de venta (tipos 1 y 13) no anuladas. Genera `data/raw/Query_Result_V6.csv`. |
+| `extraccion_ventas_v6.sql` | Consulta vigente. Igual que la V5 pero solo facturas de venta (tipos 1 y 13) no anuladas y sin servicios (mano de obra y fletes, lista explícita de códigos de producto). Genera `data/raw/Query_Result_V6.csv`. |
 | `extraer_ventas.py` | Extractor offline: ejecuta un `.sql` sobre una copia de la base Firebird y escribe el CSV en el formato exacto de la V5 (`--db --sql --out --desde --hasta`). |
 | `extraccion_ventas_v5.sql` | Consulta anterior (sin filtro de tipo de documento). Genera `data/historico/Query_Result_V5.csv`. |
 | `consultas_versiones_anteriores.sql` | Consultas de V1, V2 y V4, más consultas exploratorias. |
@@ -20,10 +20,19 @@ V2  consulta B (diaria, sin filtros)
 V3  V2 sin descripciones MANTENIMIENTO / SOLUCION (paso externo, sin SQL)
 V4  consulta C (diaria, VALORU > 1, HAVING AVG(VALORU) > 10)
 V5  extraccion_ventas_v5.sql (filtros adicionales de cantidades y totales; mezcla tipos de documento)
-V6  extraccion_ventas_v6.sql (V5 + solo facturas de venta tipos 1 y 13, no anuladas)
+V6  extraccion_ventas_v6.sql (V5 + solo facturas de venta tipos 1 y 13, no anuladas, sin servicios)
 ```
 
 V1 a V5 están en `data/historico/`; V6 en `data/raw/`.
+
+## Exclusión de servicios
+
+La V6 excluye por código de producto los servicios (`1250` MANTENIMIENTO, `2660`
+SERVICIO DE TORNO, `TORNO SPOOL`, `3087` y `FLETE`, `SEPILLADADECAMPANAS`): el
+modelo predice demanda de repuestos y un servicio no tiene existencias. No se usa
+`PRODUCTO.SERVICIO` porque marca repuestos reales y omite MANTENIMIENTO. Para
+agregar un servicio nuevo, añadir su código al FILTRO 5 del `.sql` (la prueba
+`tests/test_extraer_ventas.py` valida la lista). Detalle en `docs/CHANGELOG.md`.
 
 ## Cómo obtener el CSV de producción
 

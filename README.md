@@ -6,7 +6,7 @@ Sistema de predicción de ventas y decisiones de stock (Reforzar / Mantener / Re
 **Código heredado** (no es producción): `legacy/` (primeros pipelines, versiones 1.0 y 2.0, benchmarks sueltos de XGBoost/Prophet).  
 **Modelos de comparación** (benchmark): `scripts/compare_models.py` (RF vs XGBoost vs Prophet vs ARIMA, sobre la misma partición del modelo final).
 
-Dataset vigente: `data/raw/Query_Result_V6.csv` (facturas de venta reales del taller de los últimos dos años; 48.517 registros diarios, 3.576 productos).
+Dataset vigente: `data/raw/Query_Result_V6.csv` (facturas de venta reales del taller de los últimos dos años, sin servicios; 47.749 registros diarios, 3.573 productos).
 
 ### Métricas — clasificador (`outputs/reports/evaluacion_modelo.txt`, prueba n=8.942)
 

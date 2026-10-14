@@ -3,7 +3,7 @@
 Aquí vive únicamente el dataset que consume el modelo:
 
 - `Query_Result_V6.csv`: ventas diarias por producto (2024-01-09 a 2026-03-27),
-  solo facturas de venta no anuladas (tipos 1 y 13), extraídas con
+  solo facturas de venta no anuladas (tipos 1 y 13) y sin servicios (mano de obra y fletes, por código de producto), extraídas con
   [`sql/extraccion_ventas_v6.sql`](../../sql/extraccion_ventas_v6.sql).
 
 Para regenerarlo, usar el extractor offline `sql/extraer_ventas.py` sobre una

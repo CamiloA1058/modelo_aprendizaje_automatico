@@ -1,5 +1,180 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Datos] V6 sin servicios - 2026-10-13
+
+### Decisión y regla
+
+Decisión del usuario (2026-10-13): la tesis trata de la demanda de repuestos e inventario, y un servicio (mano de obra, flete) no tiene existencias que reforzar ni reducir. En la V6 el "producto" de mayor monto era MANTENIMIENTO (381,6 M COP, mano de obra) y también aparecía SERVICIO DE TORNO.
+
+**Regla elegida: lista explícita de códigos de producto** en `sql/extraccion_ventas_v6.sql` (FILTRO 5, `p.CODIGO NOT IN (...)`), cubierta por `tests/test_extraer_ventas.py::TestConsultaV6`. Códigos: `1250` MANTENIMIENTO, `2660` SERVICIO DE TORNO, `TORNO SPOOL`, `3087` y `FLETE` (ambos TRANSPORTE FLETE) y `SEPILLADADECAMPANAS`. Los códigos 3087, FLETE y SEPILLADADECAMPANAS no tienen ventas en facturas dentro de la extracción (solo ajustes de inventario o compras); se incluyen para que la regla siga siendo válida si se facturan.
+
+Por qué no una bandera de la base (evidencia sobre la copia, ventas de facturas 1 y 13 entre 2024-01-01 y 2026-09-30 con los filtros de la V6):
+
+| Candidato | Resultado | Veredicto |
+|---|---|---|
+| `PRODUCTO.SERVICIO = '1'` | marca 3 productos vendidos (3,9 M COP): INFLALLANTAS (manguera), un retén de rueda y un tornillo; los tres son repuestos. **No** marca MANTENIMIENTO ni SERVICIO DE TORNO | inconsistente, descartada |
+| `PRODUCTO.ESFLETE = '1'` | marca 1 producto vendido (16.000 COP): un acople de manguera | descartada |
+| `NOAFECTADOCUMENTO`, `GRATIS`, `PRODUCTOUNICO`, `BANDERAS`, `TIPOMED` | un solo valor para todos los vendidos | no discriminan |
+| Grupo VARIOS (`IDGRUPO` 52) | 24 productos vendidos (856 M COP en total): mezcla servicios con repuestos (SOLUCION DE LIMPIEZA INDUSTRIAL 176,1 M, REPUESTOS VARIOS, minifusibles, piezas "SPOOL") | descartado |
+| Reglas por nombre (MANTENIMIENTO, SERVICIO, TORNO, SOLDADURA, REPARACION...) | falsos positivos: "UNIDAD DE MANTENIMIENTO DE VASO" (repuesto), "TORN ..." (tornillo), soldaduras en varilla, empaquetaduras de "reparación" | descartada |
+
+**Excluidos (monto en la ventana de la V6, 2024-01-01 a 2026-03-27, y en el holdout, 2026-03-28 a 2026-09-30):**
+
+| Código | Producto | V6 (COP) | Filas V6 | Holdout (COP) |
+|---|---|---:|---:|---:|
+| 1250 | MANTENIMIENTO | 381.573.192,5 | 671 | 153.561.820 |
+| 2660 | SERVICIO DE TORNO | 14.957.050 | 90 | 14.773.600 |
+| TORNO SPOOL | TORNO SPOOL | 360.000 | 7 | 10.000 |
+| 3087, FLETE, SEPILLADADECAMPANAS | transporte y sepillada | 0 | 0 | 0 |
+| **Total** | | **396.890.242,5 (5,89 % de la V6 con servicios)** | **768** | **168.345.420 (5,56 % del holdout)** |
+
+**Conservados por ser productos:** SOLUCION DE LIMPIEZA INDUSTRIAL (176,1 M), SOLDADURA y soldaduras en varilla.
+**Ambiguos, no excluidos (pendiente del usuario):** REPUESTOS VARIOS (78,7 M, 2024-01 a 2026-09; ítem comodín de repuestos sin código propio), "VARIOS" (N/A) y las piezas "... SPOOL" (BANDA, CAMARA, BLOQUE, etc.; ~11 M en conjunto, parecen trabajos sobre pieza del cliente), COMPRESOR REPARADO y DISPONIBLE (sin ventas en facturas).
+
+Los CSV se regeneraron con `sql/extraer_ventas.py` sobre la copia de la base (la original no se tocó). Los reportes "antes" se respaldaron en `odd/v6_con_servicios_reports/` (sin versionar).
+
+### Dataset
+
+| | V6 con servicios | V6 sin servicios | Diferencia |
+|---|---:|---:|---:|
+| Entrenamiento: filas (producto-día) | 48.517 | 47.749 | -768 |
+| Entrenamiento: productos | 3.576 | 3.573 | -3 |
+| Entrenamiento: monto (COP) | 6.741.707.924 | 6.344.817.681 | -396.890.243 (-5,89 %) |
+| Holdout: filas | 13.807 | 13.625 | -182 |
+| Holdout: productos | 2.465 | 2.462 | -3 |
+| Holdout: monto (COP) | 3.029.726.979 | 2.861.381.559 | -168.345.420 (-5,56 %) |
+
+### Antes (V6 con servicios) y después (V6 sin servicios) del pipeline completo
+
+Números copiados de los reportes (`outputs/reports/`). La razón suma predicha/real de la prueba interna no está en los reportes: se calculó con `reg_test_results` de `train_regressor()` (0,6717 con servicios).
+
+**EDA**
+
+| | Con servicios | Sin servicios |
+|---|---:|---:|
+| Filas producto-mes tras calendario completo | 66.236 | 66.155 |
+| Productos tras limpieza | 3.576 | 3.573 |
+| Producto-mes con venta cero | 65,53 % | 65,57 % |
+| Mediana de meses en cero por producto (Q1 / Q3) | 75,00 % (51,85 / 87,50) | 75,00 % (51,85 / 87,50) |
+| Pareto A / B / C (productos) | 385 (10,8 %) / 661 (18,5 %) / 2.530 (70,7 %) | 408 (11,4 %) / 667 (18,7 %) / 2.498 (69,9 %) |
+| Ventas de A / B / C | 79,99 / 15,01 / 5,00 % | 79,98 / 15,01 / 5,00 % |
+| Promedio de ventas de julio (máximo) / abril (mínimo), COP | 436.906.414 / 119.701.508 | 419.462.940 / 106.155.984 |
+
+**Selección de k (silueta)**
+
+| k | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Con servicios | 0,3598 | 0,3940 | 0,3427 | 0,3572 | 0,3588 | 0,3687 | 0,3433 | 0,3488 | 0,3440 |
+| Sin servicios | 0,3607 | 0,3919 | 0,3445 | 0,3555 | 0,3581 | 0,3694 | 0,3452 | 0,3456 | 0,3455 |
+
+k = 3 sigue teniendo la mayor silueta (0,3919).
+
+**Ajuste de hiperparámetros del clasificador**
+
+| | Con servicios | Sin servicios |
+|---|---|---|
+| Mejores parámetros | `max_depth` 14, `min_samples_leaf` 3, `n_estimators` 300 | `max_depth` None, `min_samples_leaf` 3, `n_estimators` 300 |
+| F1 macro en validación cruzada | 0,4366 ± 0,0131 | 0,4377 ± 0,0086 |
+| F1 macro de prueba, por defecto / ajustado | 0,4507 / 0,4507 | 0,4467 / 0,4475 |
+| Acc. balanceada de prueba, por defecto / ajustado | 0,5166 / 0,5166 | 0,5030 / 0,4971 |
+
+El mejor ajuste difiere de `DEFAULT_CLF_PARAMS` solo en `max_depth` (None frente a 14); en prueba la diferencia es 0,0008 de F1 macro y la accuracy balanceada empeora, así que no es una mejora clara. Se conservan los valores por defecto; la decisión queda pendiente del usuario.
+
+**Clasificador (prueba)**
+
+| | Con servicios | Sin servicios |
+|---|---:|---:|
+| n prueba | 6.255 | 6.242 |
+| Distribución Reducir / Mantener / Reforzar | 80,18 / 3,13 / 16,69 % | 80,25 / 3,12 / 16,63 % |
+| F1 macro | 0,4507 | 0,4467 |
+| Accuracy balanceada | 0,5166 | 0,5030 |
+| Accuracy | 0,6614 | 0,6668 |
+| F1 ponderado | 0,7089 | 0,7123 |
+| F1 Reducir / Mantener / Reforzar | 0,78 / 0,10 / 0,47 | 0,79 / 0,08 / 0,47 |
+| Línea base mayoritaria: F1 macro / acc. balanceada / accuracy / F1 ponderado | 0,2967 / 0,3333 / 0,8018 / 0,7135 | 0,2968 / 0,3333 / 0,8025 / 0,7145 |
+
+Matriz de confusión sin servicios (filas = real; orden Reducir, Mantener, Reforzar): [3465, 532, 1012], [77, 35, 83], [262, 114, 662].
+
+**Regresor (prueba, top productos)**
+
+| | Con servicios | Sin servicios |
+|---|---:|---:|
+| n prueba | 4.482 | 4.472 |
+| MAE modelo / ingenuo / media_3 | 244.042 / 431.137 / 315.215 | 227.468 / 424.427 / 310.225 |
+| RMSE modelo / ingenuo / media_3 | 973.944 / 1.273.318 / 929.992 | 896.837 / 1.258.104 / 915.553 |
+| R² modelo / ingenuo / media_3 | 0,4744 / 0,1016 / 0,5208 | 0,3724 / -0,2351 / 0,3459 |
+| MASE modelo / ingenuo / media_3 | 1,0748 / 1,8988 / 1,3883 | 1,0164 / 1,8964 / 1,3862 |
+| Razón suma predicha / suma real | 0,6717 | 0,6266 |
+
+Sin servicios, el modelo supera a media_3 también en RMSE y R² (con servicios solo lo superaba en MAE y MASE), y el MASE baja a 1,0164 (sigue sobre 1).
+
+**Comparación de modelos**
+
+| Clasificador | RF con / sin | XGBoost con / sin | Mayoritaria con / sin |
+|---|---:|---:|---:|
+| F1 macro | 0,4507 / 0,4467 | 0,4350 / 0,4352 | 0,2967 / 0,2968 |
+| Acc. balanceada | 0,5166 / 0,5030 | 0,5190 / 0,5157 | 0,3333 / 0,3333 |
+| Accuracy | 0,6614 / 0,6668 | 0,6096 / 0,6097 | 0,8018 / 0,8025 |
+| F1 ponderado | 0,7089 / 0,7123 | 0,6790 / 0,6791 | 0,7135 / 0,7145 |
+
+| Regresión A (con / sin) | RF | XGBoost | Ingenuo | Media_3 |
+|---|---:|---:|---:|---:|
+| MAE | 244.042 / 227.468 | 258.181 / 248.134 | 431.137 / 424.427 | 315.215 / 310.225 |
+| RMSE | 973.944 / 896.837 | 1.041.222 / 952.489 | 1.273.318 / 1.258.104 | 929.992 / 915.553 |
+| R² | 0,4744 / 0,3724 | 0,3993 / 0,2921 | 0,1016 / -0,2351 | 0,5208 / 0,3459 |
+| MASE | 1,0748 / 1,0164 | 1,1371 / 1,1087 | 1,8988 / 1,8964 | 1,3883 / 1,3862 |
+
+| Regresión B (n 339 con / 332 sin) | RF | XGBoost | Ingenuo | Media_3 | ARIMA | Prophet |
+|---|---:|---:|---:|---:|---:|---:|
+| MAE | 146.781 / 121.963 | 154.674 / 128.974 | 311.407 / 282.368 | 234.136 / 241.987 | 214.765 / 171.728 | 191.777 / 194.072 |
+| MASE | 0,6465 / 0,5450 | 0,6812 / 0,5763 | 1,3715 / 1,2617 | 1,0312 / 1,0813 | 0,9459 / 0,7673 | 0,8446 / 0,8672 |
+
+**Estudio de caso (origen rodante, abril a septiembre)**
+
+Decisiones, con servicios -> sin servicios (entre paréntesis, la línea base mayoritaria sin servicios):
+
+| Mes | n | F1 macro | Acc. balanceada | Accuracy |
+|---|---:|---:|---:|---:|
+| 2026-04 | 699 -> 697 | 0,3785 -> 0,3599 (0,2510) | 0,4230 -> 0,4114 | 0,5150 -> 0,5165 (0,6040) |
+| 2026-05 | 762 -> 760 | 0,4451 -> 0,4487 (0,2554) | 0,4708 -> 0,4729 | 0,5564 -> 0,5579 (0,6211) |
+| 2026-06 | 766 -> 764 | 0,3521 -> 0,3652 (0,2826) | 0,4371 -> 0,4470 | 0,5039 -> 0,5105 (0,7356) |
+| 2026-07 | 727 -> 724 | 0,4663 -> 0,4769 (0,2499) | 0,4866 -> 0,4947 | 0,6107 -> 0,6119 (0,5994) |
+| 2026-08 | 761 -> 759 | 0,4358 -> 0,4329 (0,2502) | 0,4493 -> 0,4450 | 0,5848 -> 0,5916 (0,6008) |
+| 2026-09 | 858 -> 856 | 0,4415 -> 0,4433 (0,2785) | 0,4812 -> 0,4849 | 0,6119 -> 0,6133 (0,7173) |
+| Agrupado | 4.573 -> 4.560 | 0,4228 -> 0,4243 (0,2624) | 0,4570 -> 0,4575 | 0,5651 -> 0,5682 (0,6489) |
+
+Matriz de confusión agrupada sin servicios (filas = real; orden Reducir, Mantener, Reforzar): [1554, 118, 1287], [77, 23, 171], [265, 51, 1014].
+
+Montos (productos con predicción de monto), con servicios -> sin servicios:
+
+| Mes | n | MAE modelo | MASE modelo | Razón suma pred./real: modelo / ingenuo / media_3 |
+|---|---:|---:|---:|---|
+| 2026-04 | 647 -> 645 | 359.108 -> 327.119 | 1,5816 -> 1,4616 | 0,5927 -> 0,5403 / 1,1565 -> 1,1809 / 0,9805 -> 1,0014 |
+| 2026-05 | 711 -> 709 | 357.725 -> 358.710 | 1,4936 -> 1,5213 | 0,4921 -> 0,4254 / 1,1006 -> 1,0966 / 0,9064 -> 0,8962 |
+| 2026-06 | 691 -> 690 | 259.341 -> 243.365 | 1,0477 -> 1,0000 | 0,8662 -> 0,8013 / 2,1010 -> 2,1372 / 1,5864 -> 1,5767 |
+| 2026-07 | 666 -> 664 | 324.761 -> 306.074 | 1,2623 -> 1,2101 | 0,5031 -> 0,4608 / 0,9506 -> 0,9985 / 1,1015 -> 1,1374 |
+| 2026-08 | 680 -> 678 | 377.686 -> 364.083 | 1,4047 -> 1,3735 | 0,4498 -> 0,4091 / 1,1336 -> 1,1492 / 0,9778 -> 0,9982 |
+| 2026-09 | 771 -> 769 | 287.783 -> 288.696 | 1,0357 -> 1,0528 | 0,4567 -> 0,4002 / 1,3302 -> 1,3395 / 1,0416 -> 1,0435 |
+| Agrupado | 4.166 -> 4.155 | 326.665 -> 314.158 | 1,2879 -> 1,2576 | 0,5446 -> 0,4914 / 1,2572 -> 1,2798 / 1,0714 -> 1,0820 |
+
+MAE agrupado sin servicios: modelo 314.158, ingenuo 447.253 (antes 459.866), media_3 353.809 (antes 363.233). RMSE agrupado: modelo 1.026.148, ingenuo 1.190.872, media_3 961.301. El MAE del modelo es menor que el del ingenuo y que el de media_3 todos los meses (con servicios, abril era la excepción frente a media_3; sin servicios abril queda 327.119 frente a 327.493).
+
+**Sumas en pesos del estudio de caso (nuevo; millones de COP; las cuatro primeras columnas son sobre los productos con predicción de monto)**
+
+| Mes | Suma predicha (modelo) | Suma real | Suma ingenuo | Suma media_3 | Ventas reales totales del mes |
+|---|---:|---:|---:|---:|---:|
+| 2026-04 | 163,4 | 302,4 | 357,0 | 302,8 | 452,9 |
+| 2026-05 | 151,7 | 356,5 | 391,0 | 319,5 | 586,3 |
+| 2026-06 | 184,7 | 230,5 | 492,5 | 363,4 | 337,3 |
+| 2026-07 | 127,9 | 277,6 | 277,2 | 315,7 | 440,5 |
+| 2026-08 | 132,5 | 323,8 | 372,1 | 323,2 | 481,2 |
+| 2026-09 | 120,6 | 301,4 | 403,7 | 314,5 | 462,4 |
+| Agrupado | 880,7 | 1.792,1 | 2.293,5 | 1.939,1 | 2.760,6 |
+
+El modelo suma entre 0,40 y 0,80 de lo real en los productos con predicción de monto. Esos productos son entre 61 % y 68 % de las ventas totales de cada mes (agrupado 64,9 %), de modo que la suma predicha equivale a 0,32 de la venta total (880,7 / 2.760,6). El estudio de caso anterior no guardó las sumas en pesos, por lo que no hay columna "antes" para esta tabla (las razones sí están arriba). Las ventas de septiembre llegan hasta el 22.
+
+**Lectura general**: excluir los servicios casi no mueve la estructura (k = 3, Pareto, intermitencia). El clasificador queda en 0,4467 de F1 macro (-0,004) y 0,5030 de accuracy balanceada (-0,014), sin cambiar la conclusión frente a la línea base mayoritaria (gana en ambas métricas y pierde en accuracy). El regresor mejora en MAE, RMSE y MASE y ya supera a media_3 en todas las métricas de la prueba interna; el R² baja (0,4744 a 0,3724). El sesgo a la baja del total persiste (0,6266 en prueba; 0,4914 en el estudio de caso).
+
 ## [Evaluación] Estudio de caso fuera de muestra (origen rodante) - 2026-10-13
 
 `scripts/estudio_caso.py` (con los ayudantes probados de `src/ventas_forecast/case_study.py` y `tests/test_case_study.py`) evalúa el procedimiento desplegado mes a mes con ventas reales posteriores al entrenamiento (`data/holdout/ventas_2026_04_09.csv`, de 2026-03-28 a 2026-09-22). Para cada mes objetivo M (2026-04 a 2026-09) se entrena `SalesForecastModel` con la V6 más el holdout estrictamente anterior a M, con los valores por defecto del dashboard (crecimiento 1,15; reducción 0,90; k = 3; `min_months` = 6; `top_n_products` = 1900), se predice M como lo hace `entrenar.py` y se compara con las ventas reales de M. La clase real se construye con la regla de las etiquetas de entrenamiento (ventas reales de M / ventas del mes anterior; un mes sin ventas implica Reducir). La línea base siempre predice Reducir (clase mayoritaria del entrenamiento de cada mes). Los meses del holdout nunca se usaron para elegir k ni los hiperparámetros. Salidas: `outputs/reports/estudio_caso.txt` y `.csv`, `outputs/figures/estudio_caso.png`. Las ventas de septiembre están incompletas (el holdout llega al 22).
