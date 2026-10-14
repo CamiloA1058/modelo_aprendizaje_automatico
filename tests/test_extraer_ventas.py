@@ -87,5 +87,32 @@ class TestParametrosSql(unittest.TestCase):
             ex.apply_date_range("SELECT 1", "2024-01-01", "2024-02-01")
 
 
+class TestConsultaV6(unittest.TestCase):
+    """La consulta V6 debe excluir servicios (mano de obra, fletes) por codigo."""
+
+    SERVICIOS = ("1250", "2660", "TORNO SPOOL", "3087", "FLETE", "SEPILLADADECAMPANAS")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sql = (ROOT / "sql" / "extraccion_ventas_v6.sql").read_text(encoding="utf-8")
+
+    def test_filtra_tipo_de_documento_y_anulados(self):
+        self.assertIn("d.IDTIPODOCINV IN (1, 13)", self.sql)
+        self.assertIn("d.ANULADO = '0'", self.sql)
+
+    def test_excluye_servicios_por_codigo(self):
+        self.assertIn("p.CODIGO NOT IN (", self.sql)
+        for codigo in self.SERVICIOS:
+            self.assertIn(f"'{codigo}'", self.sql)
+
+    def test_no_excluye_productos_reales(self):
+        # 143 es SOLUCION DE LIMPIEZA INDUSTRIAL (producto), no un servicio.
+        self.assertNotIn("'143'", self.sql)
+
+    def test_rango_de_fechas_sigue_reemplazable(self):
+        out = ex.apply_date_range(self.sql, "2026-03-28", "2026-09-30")
+        self.assertIn("BETWEEN '2026-03-28' AND '2026-09-30'", out)
+
+
 if __name__ == "__main__":
     unittest.main()

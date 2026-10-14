@@ -17,6 +17,18 @@
 -- es pequeno frente a las ventas (ver docs/CHANGELOG.md) y restarlas
 -- exigiria un criterio de fecha/producto distinto al de la venta original.
 --
+-- Tambien se EXCLUYEN LOS SERVICIOS (mano de obra y fletes): el modelo
+-- predice demanda de repuestos, y un servicio no tiene existencias que
+-- reforzar ni reducir. La regla es una lista explicita de codigos de
+-- PRODUCTO (FILTRO 5), no una bandera de la base: PRODUCTO.SERVICIO no es
+-- confiable (marca como servicio a 3 repuestos reales, p. ej. retenes y
+-- tornillos, y no marca MANTENIMIENTO ni SERVICIO DE TORNO) y el grupo
+-- VARIOS mezcla servicios con repuestos. Servicios excluidos:
+--   1250 MANTENIMIENTO, 2660 SERVICIO DE TORNO, TORNO SPOOL,
+--   3087 y FLETE (TRANSPORTE FLETE), SEPILLADADECAMPANAS.
+-- Se conservan, por ser productos, SOLUCION DE LIMPIEZA INDUSTRIAL,
+-- SOLDADURA y REPUESTOS VARIOS. Ver docs/CHANGELOG.md ([Datos] V6 sin servicios).
+--
 -- El rango de fechas lo reemplaza sql/extraer_ventas.py (--desde/--hasta);
 -- el valor de este archivo es la ventana de entrenamiento.
 -- Los filtros de VALORU/CANTREAL/TOTALITEM son los de la V5:
@@ -74,6 +86,16 @@ WHERE d.FECHA BETWEEN '2024-01-01' AND '2026-03-27'
   -- Máximo 50 millones COP por ítem por factura (ajustar si hay productos costosos)
   AND i.TOTALITEM > 0
   AND i.TOTALITEM < 50000000
+
+  -- FILTRO 5: excluir servicios (mano de obra, fletes); ver encabezado
+  AND p.CODIGO NOT IN (
+      '1250',                  -- MANTENIMIENTO
+      '2660',                  -- SERVICIO DE TORNO
+      'TORNO SPOOL',           -- torno (mano de obra)
+      '3087',                  -- TRANSPORTE FLETE
+      'FLETE',                 -- TRANSPORTE FLETE
+      'SEPILLADADECAMPANAS'    -- SEPILLADA DE CAMPANAS (mano de obra)
+  )
 
 GROUP BY
     p.CODIGO,
