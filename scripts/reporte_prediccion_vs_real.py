@@ -48,7 +48,9 @@ ANCHOS = {"Código": 11, "Descripción": 52, "Origen": 10, "Decisión recomendad
           "Prob. crecimiento": 13, "Ventas mes anterior (COP)": 18,
           "Predicción combinada (COP)": 19, "Solo modelo (COP)": 16,
           "Real del mes (COP)": 16, "Diferencia (real − predicción)": 19,
-          "Error %": 9, "Clase real": 11, "¿Acertó la decisión?": 13}
+          "Error %": 9, "Clase real": 11, "¿Acertó la decisión?": 13,
+          "Probabilidad de venta": 14, "¿Se venderá? (predicción)": 14,
+          "¿Se vendió?": 11, "¿Acertó venta?": 11}
 
 COMO_LEER = [
     ("Cómo leer este archivo", None),
@@ -91,9 +93,24 @@ COMO_LEER = [
                    "promedio."),
     ("¿Acertó la decisión?", "Sí si la decisión recomendada coincide con la clase real. En "
                              "blanco para origen promedio."),
+    ("Probabilidad de venta", "Probabilidad (0 a 100 %) de que el producto tenga ventas el mes "
+                              "predicho, calculada por un clasificador binario entrenado solo "
+                              "con datos anteriores a ese mes. Existe para todos los productos, "
+                              "también los de origen promedio."),
+    ("¿Se venderá? (predicción)", "Sí si la probabilidad de venta alcanza el umbral que el "
+                                  "sistema fija con la validación interna del entrenamiento "
+                                  "(nunca con el mes evaluado); No en otro caso."),
+    ("¿Se vendió?", "Sí si el producto tuvo ventas reales ese mes (real mayor a 0); No si no "
+                    "vendió."),
+    ("¿Acertó venta?", "Sí si la predicción \"¿Se venderá?\" coincide con lo que pasó "
+                       "(\"¿Se vendió?\")."),
     ("Resumen", "Totales por mes: predicho por el modelo, por promedio y total, frente a lo "
                 "real; cobertura frente a lo real de los 1.900 productos con más ventas; "
-                "porcentaje de decisiones acertadas y error medio absoluto (MAE)."),
+                "porcentaje de decisiones acertadas y error medio absoluto (MAE). "
+                "\"% acierto de venta\" es el porcentaje de productos cuya venta (sí/no) "
+                "se acertó entre los productos del modelo con monto y los de estimación "
+                "por promedio (los que muestra el dashboard con monto); \"% acierto de "
+                "venta (todos)\" incluye además los productos del modelo sin monto."),
 ]
 
 
@@ -109,6 +126,7 @@ def entrenar_abril(tmp):
     m.train_regressor()
     m.predict_next_month()
     m.estimar_por_promedio()
+    m.agregar_probabilidad_venta()
     return m
 
 
@@ -147,7 +165,7 @@ def escribir_hoja(ws, tabla):
             fmt = "#,##0"
         elif col == "Error %":
             fmt = "0.0%"
-        elif col == "Prob. crecimiento":
+        elif col in ("Prob. crecimiento", "Probabilidad de venta"):
             fmt = "0%"
         else:
             continue
@@ -184,7 +202,9 @@ def escribir_resumen(ws, resumen):
         "Las ventas reales de septiembre están incompletas (el registro llega hasta el "
         "22 de septiembre). Real modelo y MAE modelo usan solo los productos del modelo con "
         "monto; los productos sin monto (fuera de los 1.900 con más ventas) cuentan en "
-        "las decisiones."))
+        "las decisiones. El % de acierto de venta usa los productos del modelo con monto y "
+        "los de estimación por promedio; el de \"todos\" incluye los productos del modelo "
+        "sin monto."))
 
 
 def escribir_como_leer(ws):
@@ -209,8 +229,10 @@ def csv_abril(tabla, ruta):
         out[col] = out[col].round(0).astype("Int64")
     out["Error %"] = (out["Error %"] * 100).round(1)
     out["Prob. crecimiento"] = (out["Prob. crecimiento"] * 100).round(1)
+    out["Probabilidad de venta"] = (out["Probabilidad de venta"] * 100).round(1)
     out = out.rename(columns={"Error %": "Error (%)",
-                              "Prob. crecimiento": "Prob. crecimiento (%)"})
+                              "Prob. crecimiento": "Prob. crecimiento (%)",
+                              "Probabilidad de venta": "Probabilidad de venta (%)"})
     out.to_csv(ruta, sep=";", decimal=",", index=False, encoding="utf-8-sig")
 
 
@@ -231,6 +253,7 @@ def main():
         for mes in ec.MESES[1:]:
             _, _, _, model = ec.evaluar_mes(mes, tmp, con_modelo=True)
             model.estimar_por_promedio()
+            model.agregar_probabilidad_venta()
             tabla, real_top = tabla_de_modelo(model, mes)
             tablas[mes] = tabla
             resumen.append(pr.resumen_mes(mes, tabla, real_top))

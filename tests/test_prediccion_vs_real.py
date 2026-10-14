@@ -108,5 +108,57 @@ class ResumenTest(unittest.TestCase):
         self.assertAlmostEqual(r["MAE promedio (COP)"], 10.0)
 
 
+def _con_venta():
+    r = _resultados()
+    r["prob_venta"] = [0.9, 0.2, 0.7, 0.6, 0.3]
+    r["se_vendera"] = ["Sí", "No", "Sí", "Sí", "No"]
+    return r
+
+
+class ProbabilidadDeVentaTest(unittest.TestCase):
+    def setUp(self):
+        self.t = pr.tabla_producto(_con_venta(), REAL, "CODIGO", "DESCRIPCION",
+                                   "TOTAL_VENDIDO", 1.15, 0.90)
+        self.f = self.t.set_index("Código")
+
+    def test_columnas_nuevas_en_la_tabla(self):
+        for col in ("Probabilidad de venta", "¿Se venderá? (predicción)",
+                    "¿Se vendió?", "¿Acertó venta?"):
+            self.assertIn(col, pr.COLUMNAS)
+        self.assertEqual(list(self.t.columns), pr.COLUMNAS)
+
+    def test_probabilidad_se_vendio_y_acierto_para_todos_los_productos(self):
+        f = self.f
+        self.assertEqual(f.loc["A", "Probabilidad de venta"], 0.9)
+        self.assertEqual(list(f["¿Se venderá? (predicción)"]), ["Sí", "No", "Sí", "Sí", "No"])
+        self.assertEqual(list(f["¿Se vendió?"]), ["Sí", "No", "Sí", "No", "Sí"])
+        self.assertEqual(list(f["¿Acertó venta?"]), ["Sí", "Sí", "Sí", "No", "No"])
+        # el promedio tambien tiene prob. de venta (no tiene decision)
+        self.assertEqual(f.loc["P", "¿Acertó venta?"], "No")
+
+    def test_sin_probabilidad_de_venta_en_los_resultados_queda_vacio(self):
+        t = pr.tabla_producto(_resultados(), REAL, "CODIGO", "DESCRIPCION",
+                              "TOTAL_VENDIDO", 1.15, 0.90)
+        self.assertTrue(t["Probabilidad de venta"].isna().all())
+        self.assertEqual(set(t["¿Acertó venta?"]), {""})
+        self.assertEqual(list(t["¿Se vendió?"]), ["Sí", "No", "Sí", "No", "Sí"])
+
+    def test_resumen_acierto_de_venta_universo_con_monto_y_todos(self):
+        r = pr.resumen_mes("2026-04", self.t, real_top_total=1000.0)
+        # universo del experimento: modelo con monto (A, B, C) + promedio (P)
+        self.assertEqual(r["Productos evaluados (venta)"], 4)
+        self.assertEqual(r["Ventas acertadas"], 3)
+        self.assertAlmostEqual(r["% acierto de venta"], 0.75)
+        # todos los productos de la hoja (incluye D, sin monto)
+        self.assertAlmostEqual(r["% acierto de venta (todos)"], 3 / 5)
+
+    def test_resumen_sin_probabilidad_de_venta_es_nan(self):
+        t = pr.tabla_producto(_resultados(), REAL, "CODIGO", "DESCRIPCION",
+                              "TOTAL_VENDIDO", 1.15, 0.90)
+        r = pr.resumen_mes("2026-04", t, real_top_total=1000.0)
+        self.assertTrue(np.isnan(r["% acierto de venta"]))
+        self.assertEqual(r["Productos evaluados (venta)"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

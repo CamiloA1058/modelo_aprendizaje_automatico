@@ -6,7 +6,9 @@ las columnas del reporte. La clase real usa la misma regla de las etiquetas
 de entrenamiento (ventas reales / ventas del mes anterior): mas de
 growth -> Reforzar, menos de reduce o sin ventas -> Reducir, en otro caso
 Mantener. Los productos por promedio no tienen decision, asi que no tienen
-clase real ni acierto.
+clase real ni acierto de decision. La probabilidad de venta (prob_venta /
+se_vendera de los resultados) existe para todos los productos: "¿Se vendió?"
+es real > 0 y "¿Acertó venta?" compara esa realidad con la prediccion.
 """
 import numpy as np
 import pandas as pd
@@ -19,6 +21,8 @@ COLUMNAS = [
     "Predicción combinada (COP)", "Solo modelo (COP)", "Real del mes (COP)",
     "Diferencia (real − predicción)", "Error %", "Clase real",
     "¿Acertó la decisión?",
+    "Probabilidad de venta", "¿Se venderá? (predicción)", "¿Se vendió?",
+    "¿Acertó venta?",
 ]
 _NOMBRE_CLASE = {0: "Reducir", 1: "Mantener", 2: "Reforzar"}
 _DECISION_A_NOMBRE = {"Reducir stock": "Reducir", "Mantener stock": "Mantener",
@@ -47,6 +51,16 @@ def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce):
     dec = r["decision"].map(_DECISION_A_NOMBRE).to_numpy(object)
     acierto[mod] = np.where(dec[mod] == clase[mod], "Sí", "No")
 
+    vendio = real_v > 0
+    if "prob_venta" in r.columns and "se_vendera" in r.columns:
+        prob_venta = r["prob_venta"].to_numpy(float)
+        se_vendera = r["se_vendera"].to_numpy(object)
+        acierto_venta = np.where((se_vendera == "Sí") == vendio, "Sí", "No")
+    else:
+        prob_venta = np.full(len(r), np.nan)
+        se_vendera = np.full(len(r), "", dtype=object)
+        acierto_venta = np.full(len(r), "", dtype=object)
+
     with np.errstate(divide="ignore", invalid="ignore"):
         error = np.where(real_v > 0, np.abs(real_v - pred) / real_v, np.nan)
     out = pd.DataFrame({
@@ -66,6 +80,10 @@ def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce):
         "Error %": error,
         "Clase real": clase,
         "¿Acertó la decisión?": acierto,
+        "Probabilidad de venta": prob_venta,
+        "¿Se venderá? (predicción)": se_vendera,
+        "¿Se vendió?": np.where(vendio, "Sí", "No"),
+        "¿Acertó venta?": acierto_venta,
     })
     return out[COLUMNAS]
 
@@ -81,6 +99,13 @@ def resumen_mes(mes, tabla, real_top_total=None):
     mod_m = mod[mod[pred].notna()]
     evaluadas = tabla[tabla["¿Acertó la decisión?"] != ""]
     aciertos = int((evaluadas["¿Acertó la decisión?"] == "Sí").sum())
+    # Acierto de venta: universo del experimento "Probabilidad de venta"
+    # (productos del modelo con monto + estimacion por promedio) y todos.
+    con_venta = tabla[tabla["¿Acertó venta?"] != ""]
+    univ = tabla[(tabla["Origen"] == "promedio") | tabla[pred].notna()]
+    univ = univ[univ["¿Acertó venta?"] != ""]
+    ac_univ = int((univ["¿Acertó venta?"] == "Sí").sum())
+    ac_todos = int((con_venta["¿Acertó venta?"] == "Sí").sum())
     pred_mod, pred_prom = float(mod_m[pred].sum()), float(prom[pred].sum())
     real_mod, real_prom = float(mod_m[real].sum()), float(prom[real].sum())
     real_total = real_mod + real_prom
@@ -105,6 +130,12 @@ def resumen_mes(mes, tabla, real_top_total=None):
         "Decisiones acertadas": aciertos,
         "% decisiones acertadas": (aciertos / len(evaluadas)
                                    if len(evaluadas) else float("nan")),
+        "Productos evaluados (venta)": int(len(univ)),
+        "Ventas acertadas": ac_univ,
+        "% acierto de venta": (ac_univ / len(univ) if len(univ)
+                               else float("nan")),
+        "% acierto de venta (todos)": (ac_todos / len(con_venta)
+                                       if len(con_venta) else float("nan")),
         "MAE modelo (COP)": (float((mod_m[real] - mod_m[pred]).abs().mean())
                              if len(mod_m) else float("nan")),
         "MAE promedio (COP)": (float((prom[real] - prom[pred]).abs().mean())
