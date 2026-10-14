@@ -118,11 +118,15 @@ def choose_tweedie(Xtr, ytr, Xva, yva, powers=(1.2, 1.5, 1.8), **kw):
     return mejor, modelos[mejor], maes
 
 
-def _mediana_ponderada(valores, pesos):
-    o = np.argsort(valores, kind="stable")
-    v, w = np.asarray(valores)[o], np.asarray(pesos)[o]
-    acum = np.cumsum(w)
-    return float(v[np.searchsorted(acum, acum[-1] / 2.0)])
+def _mejor_factor_acierto(p, r, clip, pasos=60):
+    """Factor c de una rejilla geometrica dentro de `clip` que maximiza el
+    acierto por producto recortado, media de clip(1 - |r - c*p| / r, 0, 1),
+    sobre las filas con r > 0 y p > 0. Empates: el c mas cercano a 1."""
+    grilla = np.geomspace(clip[0], clip[1], pasos)
+    r_, p_ = r[:, None], p[:, None]
+    acc = np.clip(1.0 - np.abs(r_ - grilla[None, :] * p_) / r_, 0.0, 1.0).mean(axis=0)
+    mejores = grilla[acc >= acc.max() - 1e-12]
+    return float(mejores[np.argmin(np.abs(np.log(mejores)))])
 
 
 def fit_bucket_correction(pred, real, n_buckets=CUBETAS, mode="acc",
@@ -130,9 +134,8 @@ def fit_bucket_correction(pred, real, n_buckets=CUBETAS, mode="acc",
     """Factor multiplicativo por cubeta de monto predicho (cuantiles de pred),
     aprendido con datos de validacion interna.
     mode "sum": suma(real) / suma(pred) de la cubeta (corrige el total).
-    mode "acc": mediana ponderada de real/pred con pesos pred/real sobre los
-    productos con real > 0: minimiza sum |real - c*pred| / real, es decir
-    maximiza el acierto por producto sin recortar.
+    mode "acc": factor que maximiza el acierto por producto recortado a [0, 1]
+    (la metrica del experimento) sobre los productos con real > 0 y pred > 0.
     Cubetas con menos de min_n filas (o sin dato) quedan en 1. Devuelve
     {"edges", "factors"}."""
     if mode not in ("sum", "acc"):
@@ -155,7 +158,7 @@ def fit_bucket_correction(pred, real, n_buckets=CUBETAS, mode="acc",
             mm = m & (r > 0) & (p > 0)
             if not mm.any():
                 continue
-            f = _mediana_ponderada(r[mm] / p[mm], p[mm] / r[mm])
+            f = _mejor_factor_acierto(p[mm], r[mm], clip)
         factors[k] = float(np.clip(f, clip[0], clip[1]))
     return {"edges": edges, "factors": factors}
 

@@ -122,13 +122,26 @@ class CorreccionPorTamanoTest(unittest.TestCase):
         out = mp.apply_bucket_correction(np.array([1.0, 10.0]), corr)
         np.testing.assert_allclose(out, [2.0, 5.0])
 
-    def test_modo_acierto_usa_la_mediana_ponderada_de_real_sobre_pred(self):
-        # razones real/pred 0,5 / 1 / 2 con pesos pred/real 2 / 1 / 0,5
+    def test_modo_acierto_maximiza_el_acierto_recortado_por_producto(self):
+        # real/pred = 0,5 / 1 / 2: con c = 0,5 los aciertos son 1 / 0,5 / 0,25
+        # (suma 1,75), el maximo de la rejilla; c = 1 solo suma 1,5.
         pred = np.ones(3)
         real = np.array([0.5, 1.0, 2.0])
         corr = mp.fit_bucket_correction(pred, real, n_buckets=1, mode="acc", min_n=1,
                                         clip=(0.1, 10.0))
-        self.assertAlmostEqual(corr["factors"][0], 0.5)
+        self.assertAlmostEqual(corr["factors"][0], 0.5, delta=0.03)
+
+    def test_modo_acierto_ignora_reales_en_cero(self):
+        corr = mp.fit_bucket_correction([1.0] * 4, [0.0, 0.0, 2.0, 2.0], n_buckets=1,
+                                        mode="acc", min_n=1, clip=(0.1, 10.0))
+        self.assertAlmostEqual(corr["factors"][0], 2.0, delta=0.1)
+
+    def test_modo_acierto_no_se_deja_arrastrar_por_una_sobreprediccion_extrema(self):
+        # una fila sobrepredicha 10 veces vale 0 de acierto con cualquier c
+        # razonable: el optimo sigue a las otras tres (real/pred = 3)
+        corr = mp.fit_bucket_correction([1.0] * 4, [0.1, 3.0, 3.0, 3.0], n_buckets=1,
+                                        mode="acc", min_n=1, clip=(0.05, 10.0))
+        self.assertAlmostEqual(corr["factors"][0], 3.0, delta=0.15)
 
     def test_el_factor_se_recorta(self):
         corr = mp.fit_bucket_correction([1.0, 1.0], [100.0, 100.0], n_buckets=1,

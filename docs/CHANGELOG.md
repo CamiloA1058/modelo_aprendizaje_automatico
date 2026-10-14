@@ -1,3 +1,88 @@
+## [Experimento] Acierto del monto por producto - 2026-10-14
+
+Experimento sin cambios en producción (modelo, dashboard y `entrenar.py` intactos). Meta del usuario: acercar a ~70 % el acierto del monto predicho frente al real por producto. Script `scripts/experimento_monto_producto.py`, ayudantes puros `src/ventas_forecast/monto_producto.py` (23 pruebas), informe `outputs/reports/experimento_monto_producto.txt/.csv` y figura `outputs/figures/experimento_monto_producto.png`.
+
+**Diseño.** Mismo origen rodante del estudio de caso y mismo universo del dashboard (productos del modelo con monto + productos por promedio). Para cada horizonte (1, 2 y 3 meses) se entrena con el objetivo a ese horizonte (suma de los h meses siguientes) usando solo datos anteriores al primer mes del bloque. Bloques sin traslape: mensual abril a septiembre; bimestral abr-may, jun-jul, ago-sep; trimestral abr-jun, jul-sep (septiembre incompleto, llega al 22). Potencia Tweedie {1,2; 1,5; 1,8}, modelo condicional (RF o XGB), umbral de P(venta), pesos de mezcla y factores de corrección se eligen solo con la validación interna (último 20 % de cada producto). Las variantes señaladas como "mejores" se escogen mirando el holdout, por lo que son optimistas.
+
+Variantes: **Base** (producción x h); **Control** (pipeline de producción reentrenado a h meses; reproduce la Base mensual: 35,9 % / 18,4 % / 15,1 % frente a 36,0 % / 18,4 % / 15,2 %); **C** (variables de probabilidad de venta en el RF de producción); **B** (XGBoost `reg:tweedie` en pesos); **A0** (monto condicional), **A1** (P(venta) x monto condicional), **A2** (monto condicional si P >= umbral, si no 0); **+M** (mezcla con media_3); **+D** (corrección por deciles del monto predicho, que maximiza el acierto o corrige la suma; A+D equivale a A+C+D porque A ya usa las variables enriquecidas). Métricas: acierto medio = media de 1 − |real − pred| / real recortado a [0, 1] sobre productos con real > 0; ±30 % y ±50 % sobre esos productos; 1−WAPE y razón de sumas sobre todo el universo.
+
+**Agrupado mensual.**
+
+| Variante | Acierto medio | ±30 % | ±50 % | 1−WAPE | Pred/real | MAE (COP) | n |
+|---|---|---|---|---|---|---|---|
+| Base (producción) | 36,0 % | 18,4 % | 33,2 % | 15,2 % | 0,93 | 292.485 | 6.145 |
+| Media de 3 meses | 36,0 % | 19,6 % | 34,2 % | 10,1 % | 1,08 | 310.138 | 6.145 |
+| Control: RF de producción | 35,9 % | 18,4 % | 33,3 % | 15,1 % | 0,94 | 292.775 | 6.145 |
+| C: RF enriquecido | 36,1 % | 18,4 % | 33,4 % | 15,4 % | 0,93 | 291.961 | 6.145 |
+| B: XGBoost Tweedie | 34,4 % | 18,5 % | 32,3 % | 10,2 % | 0,74 | 309.882 | 6.145 |
+| A0: monto condicional | 36,9 % | 21,7 % | 37,1 % | 4,4 % | 1,17 | 329.841 | 6.145 |
+| A1: P(venta) × monto | 38,0 % | 20,8 % | 35,9 % | 17,8 % | 0,93 | 283.720 | 6.145 |
+| A2: monto si P ≥ umbral | 28,0 % | 16,5 % | 28,4 % | 21,4 % | 0,87 | 271.040 | 6.145 |
+| B+M: Tweedie y media 3 | 36,5 % | 19,8 % | 35,0 % | 11,3 % | 1,05 | 306.031 | 6.145 |
+| A1+M: A1 y media 3 | 38,3 % | 21,0 % | 36,4 % | 14,8 % | 0,99 | 293.876 | 6.145 |
+| C+D (acierto) | 37,1 % | 18,6 % | 33,4 % | 16,7 % | 0,75 | 287.408 | 6.145 |
+| C+D (suma) | 37,0 % | 20,7 % | 36,1 % | 14,1 % | 0,96 | 296.461 | 6.145 |
+| A0+D (acierto) | 37,8 % | 19,6 % | 35,6 % | 12,0 % | 0,89 | 303.677 | 6.145 |
+| A0+D (suma) | 38,2 % | 21,1 % | 36,2 % | 11,7 % | 0,94 | 304.728 | 6.145 |
+| A1+D (acierto) | 38,2 % | 20,2 % | 36,0 % | 18,6 % | 0,80 | 280.968 | 6.145 |
+| A1+D (suma) | 36,7 % | 20,1 % | 35,6 % | 11,9 % | 1,06 | 303.913 | 6.145 |
+
+**Agrupado bimestral** ("Suma mensual rodante" usa orígenes posteriores al del bloque; es solo referencia).
+
+| Variante | Acierto medio | ±30 % | ±50 % | 1−WAPE | Pred/real | MAE (COP) | n |
+|---|---|---|---|---|---|---|---|
+| Base (producción) | 37,8 % | 20,5 % | 36,6 % | 27,4 % | 0,96 | 506.327 | 3.038 |
+| Suma mensual rodante (ref.) | 42,4 % | 23,8 % | 42,3 % | 34,9 % | 0,94 | 454.243 | 3.038 |
+| Media de 3 meses | 37,6 % | 21,3 % | 37,4 % | 23,1 % | 1,10 | 536.201 | 3.038 |
+| Control: RF de producción | 37,2 % | 20,4 % | 36,1 % | 26,7 % | 1,03 | 511.421 | 3.038 |
+| C: RF enriquecido | 37,7 % | 21,2 % | 37,3 % | 29,4 % | 1,03 | 492.546 | 3.038 |
+| B: XGBoost Tweedie | 30,5 % | 18,2 % | 31,2 % | -11,5 % | 1,36 | 777.764 | 3.038 |
+| A0: monto condicional | 37,9 % | 24,1 % | 39,5 % | 22,9 % | 1,13 | 537.538 | 3.038 |
+| A1: P(venta) × monto | 39,2 % | 23,6 % | 38,9 % | 29,0 % | 0,99 | 495.491 | 3.038 |
+| A2: monto si P ≥ umbral | 33,2 % | 21,4 % | 34,8 % | 27,9 % | 1,01 | 502.894 | 3.038 |
+| B+M: Tweedie y media 3 | 38,3 % | 21,9 % | 38,4 % | 25,7 % | 1,08 | 518.031 | 3.038 |
+| A1+M: A1 y media 3 | 38,9 % | 22,3 % | 39,0 % | 25,9 % | 1,06 | 516.504 | 3.038 |
+| C+D (acierto) | 38,6 % | 21,0 % | 36,4 % | 32,2 % | 0,80 | 472.965 | 3.038 |
+| C+D (suma) | 38,0 % | 23,5 % | 38,8 % | 29,6 % | 1,02 | 491.288 | 3.038 |
+| A0+D (acierto) | 39,3 % | 23,0 % | 38,9 % | 25,4 % | 0,92 | 520.043 | 3.038 |
+| A0+D (suma) | 37,5 % | 23,3 % | 38,1 % | 20,3 % | 1,18 | 555.924 | 3.038 |
+| A1+D (acierto) | 39,2 % | 22,6 % | 38,4 % | 28,9 % | 0,85 | 495.928 | 3.038 |
+| A1+D (suma) | 35,1 % | 21,6 % | 37,3 % | 19,3 % | 1,25 | 563.066 | 3.038 |
+
+**Agrupado trimestral.**
+
+| Variante | Acierto medio | ±30 % | ±50 % | 1−WAPE | Pred/real | MAE (COP) | n |
+|---|---|---|---|---|---|---|---|
+| Base (producción) | 38,0 % | 20,0 % | 36,5 % | 34,3 % | 0,91 | 684.140 | 2.035 |
+| Suma mensual rodante (ref.) | 48,4 % | 28,7 % | 51,7 % | 48,3 % | 0,93 | 537.848 | 2.035 |
+| Media de 3 meses | 37,1 % | 20,0 % | 36,4 % | 29,5 % | 1,07 | 733.416 | 2.035 |
+| Control: RF de producción | 35,4 % | 20,2 % | 35,5 % | 26,1 % | 1,17 | 769.386 | 2.035 |
+| C: RF enriquecido | 34,6 % | 20,2 % | 33,8 % | 28,2 % | 1,15 | 747.770 | 2.035 |
+| B: XGBoost Tweedie | 33,7 % | 22,1 % | 36,4 % | 27,8 % | 1,16 | 750.997 | 2.035 |
+| A0: monto condicional | 35,9 % | 23,6 % | 36,6 % | 24,2 % | 1,28 | 788.488 | 2.035 |
+| A1: P(venta) × monto | 38,1 % | 23,9 % | 38,8 % | 29,0 % | 1,17 | 738.808 | 2.035 |
+| A2: monto si P ≥ umbral | 33,7 % | 22,4 % | 34,5 % | 25,9 % | 1,22 | 771.093 | 2.035 |
+| B+M: Tweedie y media 3 | 39,0 % | 22,0 % | 39,9 % | 33,3 % | 1,07 | 693.933 | 2.035 |
+| A1+M: A1 y media 3 | 38,3 % | 20,6 % | 38,3 % | 33,2 % | 1,07 | 695.152 | 2.035 |
+| C+D (acierto) | 38,1 % | 20,2 % | 36,6 % | 36,7 % | 0,80 | 658.385 | 2.035 |
+| C+D (suma) | 34,3 % | 20,4 % | 34,3 % | 30,1 % | 1,11 | 727.978 | 2.035 |
+| A0+D (acierto) | 38,9 % | 22,9 % | 39,6 % | 30,7 % | 1,00 | 721.215 | 2.035 |
+| A0+D (suma) | 35,6 % | 23,6 % | 37,4 % | 20,4 % | 1,34 | 828.114 | 2.035 |
+| A1+D (acierto) | 39,4 % | 23,6 % | 40,9 % | 33,2 % | 0,97 | 695.224 | 2.035 |
+| A1+D (suma) | 32,4 % | 22,7 % | 34,9 % | 18,7 % | 1,37 | 846.006 | 2.035 |
+
+**Exactitud de "vende o no"** (P >= umbral de cada bloque): mensual 70,6 % (regla "vendió el mes anterior" 62,5 %; 60,0 % de los productos vende), bimestral 77,6 % (regla 68,3 %; 77,7 % vende), trimestral 83,8 % (regla 67,0 %; 84,8 % vende). En bimestral y trimestral el clasificador no supera a "siempre vende".
+
+**Por bloque y segmentos.** Las tablas por bloque y por segmento (top 100 del real, venden todos los meses, resto) están en el informe. Ejemplo mensual, top 100 (n = 600): Base 41,1 % de acierto medio y 43,1 % de 1−WAPE, razón 0,64; A1+M 43,6 % / 44,7 %, razón 0,66. Los productos que no venden todos los meses (resto) tienen en bimestral y trimestral un 1−WAPE negativo en la Base (−121,4 % y −57,3 %) porque se sobreestiman.
+
+**¿Se alcanza el 70 %?** No. Ninguna variante, horizonte, bloque ni segmento llega a 70 % en acierto medio, ±30 %, ±50 % ni 1−WAPE. Máximos en cualquier combinación: acierto medio 56,5 % (B, trimestral, abr-jun, top 100, n = 100), ±30 % 43,0 %, ±50 % 59,0 %, 1−WAPE 59,5 % (n = 335 y 100). El 70 % solo se logra en la pregunta "¿vende o no?" del experimento anterior, no en el monto.
+
+**Diferencia del mejor frente a la Base** (acierto medio, pareada, IC 95 % orientativo): mensual A1+M +2,26 puntos (+1,53 a +3,00); bimestral A0+D +1,48 (−0,01 a +2,97); trimestral A1+D +1,44 (−0,44 a +3,32). Solo la mejora mensual se distingue del ruido; es pequeña (36,0 % a 38,3 %).
+
+**Hallazgos.** (1) Enriquecer el RF de producción con las variables de probabilidad no cambia el resultado (36,1 % frente a 36,0 % mensual). (2) Tweedie en pesos no mejora y es inestable en bimestral (1−WAPE −11,5 %). (3) El mejor aporte mensual es multiplicar el monto condicional por P(venta) (A1: 38,0 %, 1−WAPE 17,8 %). (4) La corrección por tamaño (D) mejora a veces el acierto medio a costa de subpredecir (razón de sumas 0,75 a 0,97 en las variantes de acierto) y no es estable entre bloques. (5) Anular el monto cuando P < umbral (A2) empeora el acierto medio (28,0 % mensual) porque los falsos negativos quedan en 0, aunque baja el MAE. (6) Sumar más meses ayuda al 1−WAPE de la Base (15,2 % mensual, 27,4 % bimestral, 34,3 % trimestral) pero el acierto medio casi no sube (36,0 %, 37,8 %, 38,0 %); el acierto por producto está limitado por la intermitencia de las ventas.
+
+**Conclusión y recomendación.** La meta de ~70 % por producto no es alcanzable con estos datos y variantes; el techo observado ronda 38 a 39 % de acierto medio. No se recomienda cambiar el modelo de producción por una mejora de 2 puntos. Si se quiere una mejora de bajo riesgo, A1+M (probabilidad de venta x monto condicional mezclado con media_3) en el horizonte mensual es la única que se separa del ruido; para planificar, el trimestre da el mejor 1−WAPE (Base 34,3 %; C+D 36,7 %) y conviene presentar el monto agregado (por categoría o total) en vez de por producto. Cualquier adopción debe validarse en meses nuevos, porque la elección de la "mejor" variante se hizo sobre el mismo holdout.
+
 # 📝 CHANGELOG - Control de Versiones
 
 ## [Experimento] Probabilidad de venta (meta 70 %) - 2026-10-14
