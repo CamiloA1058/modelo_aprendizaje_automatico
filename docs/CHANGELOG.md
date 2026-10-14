@@ -1,5 +1,44 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Experimento] Probabilidad de venta (meta 70 %) - 2026-10-14
+
+Experimento sin cambios en producción (modelo, dashboard y `entrenar.py` intactos). Pregunta: ¿el producto tendrá ventas el mes siguiente (sí/no)? Meta del usuario: 70 % de exactitud en meses reales no vistos. Código: `src/ventas_forecast/sale_probability.py` (variables, marco de entrenamiento, umbral, métricas; `tests/test_sale_probability.py`, 20 pruebas; suite de 222 OK) y `scripts/experimento_probabilidad_venta.py`. Informe: `outputs/reports/experimento_probabilidad_venta.txt`, `.csv` y `_calibracion.csv`; figura `outputs/figures/experimento_probabilidad_venta.png` (`outputs/` no se versiona).
+
+**Diseño.** Origen rodante igual al del estudio de caso (2026-04 a 2026-09; entrenamiento con la V6 más el holdout anterior a cada mes). Objetivo `vende` = ventas del mes siguiente > 0 sobre el calendario completo; el marco incluye filas con mes actual en cero si hubo ventas en los últimos 6 meses; partición temporal 80/20 por producto y el 20 % (validación interna) fija el umbral que maximiza la exactitud. Nada se eligió con el holdout. Variables nuevas, sin mirar al futuro (probado): meses desde la última venta, meses con venta en los últimos 3/6/12, rezago 12, rezagos 1-3 de FRECUENCIA y su media, edad y fracción histórica de meses con venta. Modelos: Random Forest (sin pesos y balanceado), XGBoost y regresión logística; reglas: vendió el mes anterior, ≥ 2 de los últimos 3 meses, fracción histórica > 0,5. Universo (a): el del dashboard (modelo con monto + estimación por promedio): 6.145 producto-mes, 60,0 % vende y la regla "vendió el mes anterior" acierta 62,5 %, como en la línea base. Universo (b): productos con ≥ 1 venta en los 6 meses previos (14.440 producto-mes, 35,4 % vende).
+
+**Exactitud agrupada, universo (a).**
+
+| Modelo / regla | Exactitud | Ex. balanceada | AUC |
+|---|---|---|---|
+| Random Forest | 70,2 % | 69,4 % | 0,7724 |
+| RF balanceado | 70,8 % | 69,8 % | 0,7732 |
+| XGBoost | 70,3 % | 69,8 % | 0,7681 |
+| Regresión logística | 70,4 % | 69,0 % | 0,7676 |
+| Regla: vendió el mes anterior | 62,5 % | 59,3 % | - |
+| Regla: ≥2 de los últimos 3 | 65,4 % | 62,3 % | - |
+| Regla: fracción histórica > 0,5 | 70,3 % | 69,2 % | - |
+
+**Exactitud por mes, universo (a).**
+
+| Modelo / regla | 2026-04 | 2026-05 | 2026-06 | 2026-07 | 2026-08 | 2026-09 |
+|---|---|---|---|---|---|---|
+| Random Forest | 68,8 % | 70,3 % | 70,2 % | 70,8 % | 70,9 % | 70,3 % |
+| RF balanceado | 69,6 % | 70,6 % | 69,5 % | 72,0 % | 71,7 % | 71,1 % |
+| XGBoost | 68,4 % | 72,0 % | 69,7 % | 70,3 % | 71,3 % | 70,3 % |
+| Regresión logística | 70,7 % | 68,9 % | 70,5 % | 70,6 % | 71,7 % | 70,2 % |
+| Regla: vendió el mes anterior | 62,4 % | 62,7 % | 62,1 % | 62,6 % | 66,1 % | 59,1 % |
+| Regla: ≥2 de los últimos 3 | 64,9 % | 65,9 % | 63,7 % | 65,2 % | 69,9 % | 62,7 % |
+| Regla: fracción histórica > 0,5 | 71,3 % | 69,3 % | 70,0 % | 70,5 % | 70,6 % | 69,9 % |
+| % real que vende | 63,6 % | 59,7 % | 58,0 % | 59,5 % | 65,2 % | 54,3 % |
+
+**Universo (b), agrupado.** Random Forest 77,8 %, RF balanceado 78,0 %, XGBoost 77,2 %, regresión logística 77,9 %; reglas 66,9 % / 73,8 % / 75,0 %. Los 4 modelos superan el 70 % en los 6 meses.
+
+**Segmentos del universo (a).** Productos del modelo (n = 4.155): 72,9 % a 73,7 % los modelos; productos por promedio (n = 1.990): 64,4 % a 64,7 %. En (b), top 1.900: 73,1 % a 73,9 %; resto: 85,1 % a 85,9 % (14,9 % vende, predice casi siempre "no").
+
+**Conclusión (honesta).** La meta se cumple en el agrupado del universo (a) con los 4 modelos (70,2 % a 70,8 %), pero por poco: el IC 95 % del mejor (RF balanceado, 70,76 %) va de 69,62 % a 71,89 % y por mes la meta se cumple en 4 a 5 de 6 meses según el modelo (abril la incumple casi todos). Además la regla simple "fracción histórica de meses con venta > 0,5" logra 70,3 % sin entrenar: el mejor modelo la supera en 0,50 puntos (IC 95 %: -0,25 a 1,25), es decir, sin diferencia demostrable. El AUC es ~0,77 y la calibración sobreestima la probabilidad en los deciles medios. El límite está en los productos por promedio (64,6 %), cuya venta es intermitente. No hizo falta la ronda de mejora (el agrupado ya era ≥ 70 %). Recomendación: si se lleva al sistema, una probabilidad de venta basada en recencia/frecuencia es defendible, pero se debe presentar como ~70 % (no más) y comparar con la regla simple; en el universo (b) la exactitud sube a ~78 %.
+
+---
+
 ## [Sistema] Estimación por promedio para productos sin venta el último mes - 2026-10-13
 
 Decisión del usuario tras el experimento "Elegibilidad ampliada": el clasificador es peor que la clase mayoritaria en esos productos (exactitud 0,4747 frente a 0,6776, Reforzar predicho 66,3 % frente a 29,6 % real), así que NO reciben decisión del modelo; pero su monto sí se estima, porque el promedio de 3 meses cubre mejor el total.
