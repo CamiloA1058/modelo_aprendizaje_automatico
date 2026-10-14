@@ -30,3 +30,8 @@ odd/
 # Credenciales y exploracion local de la base de datos
 sql/exploracion/.env
 scripts_db/
+
+# Bases de datos reales del taller (no versionar)
+data/test_db/
+*.FDB
+*.fdb
