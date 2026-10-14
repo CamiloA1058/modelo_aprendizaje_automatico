@@ -292,7 +292,7 @@
           <table>
             <thead><tr>
               <th>Código</th><th>Descripción</th>
-              <th>Ventas base</th><th>Predicción</th>
+              <th>Ventas base</th><th>Predicción</th><th title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
               <th>Prob. reducción</th><th>Decisión</th><th>Prob. venta</th><th>Se venderá</th>
             </tr></thead>
             <tbody id="top-risk-body"></tbody>
@@ -306,7 +306,7 @@
           <table>
             <thead><tr>
               <th>Código</th><th>Descripción</th>
-              <th>Ventas base</th><th>Predicción</th>
+              <th>Ventas base</th><th>Predicción</th><th title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
               <th>Prob. crecimiento</th><th>Decisión</th><th>Prob. venta</th><th>Se venderá</th>
             </tr></thead>
             <tbody id="top-growth-body"></tbody>
@@ -343,9 +343,10 @@
             <th>Ventas mes anterior</th>
             <th>Variación</th>
             <th>% del total</th>
+            <th title="Suma del stock sugerido de los productos del grupo (nivel de servicio 70 % por producto)">Stock sugerido (70 %)</th>
           </tr></thead>
           <tbody id="grupos-body">
-            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
+            <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
           </tbody>
         </table>
       </div>
@@ -357,6 +358,10 @@
     <div class="page-header">
       <h1>Catálogo de predicciones</h1>
       <p id="prod-subtitle">Haz clic en cualquier producto para ver su historial completo</p>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;font-size:13px;line-height:1.5;">
+      <strong>Stock sugerido (70 %).</strong> Si tiene en inventario hasta este valor, en los meses de prueba (abril a septiembre de 2026) se cubrió la demanda de 7 de cada 10 productos (68 % medido). Es un nivel máximo de abastecimiento, no una predicción exacta: normalmente queda por encima de lo que se vende y, para los productos con muy baja probabilidad de venta, es casi cero.
     </div>
 
     <div class="toolbar">
@@ -378,6 +383,7 @@
         <option value="prob">Ordenar: probabilidad</option>
         <option value="venta_prob">Ordenar: probabilidad de venta</option>
         <option value="ventas">Ordenar: ventas predichas</option>
+        <option value="stock">Ordenar: stock sugerido</option>
         <option value="codigo">Ordenar: código</option>
       </select>
       <button class="btn" onclick="window.location='/api/download'">
@@ -395,12 +401,13 @@
             <th>Ventas <small style="font-size:9px;font-weight:400">mes base</small></th>
             <th>Predicción <small id="th-mes" style="font-size:9px;font-weight:400"></small></th>
             <th>Variación</th>
+            <th title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
             <th>Prob. crecimiento</th>
             <th title="Probabilidad de venta">Prob. de venta</th><th>Se venderá</th>
             <th>Decisión</th><th>Seg.</th>
           </tr></thead>
           <tbody id="products-body">
-            <tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
+            <tr><td colspan="11" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
           </tbody>
         </table>
       </div>
@@ -537,7 +544,7 @@ function renderGrupos() {
     .filter(x => !q || x.g.grupo.toUpperCase().includes(q));
   document.getElementById('grupos-count').textContent = fmt(filas.length) + ' grupos';
   if (!filas.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
     return;
   }
   tbody.innerHTML = filas.map(({ g, i }) => `
@@ -549,6 +556,7 @@ function renderGrupos() {
       <td>${COP(g.mes_anterior)}</td>
       <td>${g.variacion != null ? deltaHtml(g.variacion * 100) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${(g.pct_total * 100).toFixed(1)}%</td>
+      <td>${g.stock_sugerido != null ? COP(g.stock_sugerido) : '<span style="color:var(--muted)">—</span>'}</td>
     </tr>`).join('');
 }
 
@@ -817,6 +825,7 @@ function renderTopRisk(rows) {
       <td class="desc" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
       <td>${COP(r.ventas_base)}</td>
       <td>${COP(r.ventas_predichas)}</td>
+      <td>${stockHtml(r)}</td>
       <td>
         <div class="prob-wrap">
           <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_reduccion*100)}%;background:var(--red)"></div></div>
@@ -836,6 +845,7 @@ function renderTopGrowth(rows) {
       <td class="desc" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
       <td>${COP(r.ventas_base)}</td>
       <td>${COP(r.ventas_predichas)}</td>
+      <td>${stockHtml(r)}</td>
       <td>
         <div class="prob-wrap">
           <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_crecimiento*100)}%"></div></div>
@@ -846,6 +856,13 @@ function renderTopGrowth(rows) {
       <td>${probVentaHtml(r)}</td>
       <td>${ventaBadge(r.se_vendera, true)}</td>
     </tr>`).join('');
+}
+
+function stockHtml(r) {
+  if (r.stock_sugerido == null) return '<span style="color:var(--muted)">—</span>';
+  const u = r.stock_sugerido_unidades != null
+    ? `<div style="font-size:10px;color:var(--muted)">${fmt(r.stock_sugerido_unidades)} uds</div>` : '';
+  return `<span style="font-weight:600">${COP(r.stock_sugerido)}</span>${u}`;
 }
 
 function probVentaHtml(r) {
@@ -898,7 +915,7 @@ async function loadProducts() {
 
   const tbody = document.getElementById('products-body');
   if (!d.data || !d.data.length) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
     return;
   }
 
@@ -913,6 +930,7 @@ async function loadProducts() {
       <td>${COP(base)}</td>
       <td>${COP(pred)}</td>
       <td>${varia != null ? deltaHtml(varia) : '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${stockHtml(r)}</td>
       <td>
         ${r.origen_estimacion === 'promedio'
           ? '<span style="color:var(--muted)" title="Estimación por promedio de los últimos 3 meses">—</span>'
@@ -954,6 +972,13 @@ async function openDetail(codigo) {
     </div>
     <h2 style="font-size:15px;font-weight:600;margin-bottom:2px;">${d.descripcion}</h2>
     <p style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:20px;">${d.codigo}</p>
+
+    ${p.stock_sugerido != null ? `
+    <div class="card" style="margin-bottom:16px;padding:12px 14px;font-size:13px;line-height:1.5;">
+      <div class="kpi-label">Stock sugerido (70 %)</div>
+      <div style="font-size:17px;font-weight:600;">${COP(p.stock_sugerido)}${p.stock_sugerido_unidades != null ? ` <span style="font-size:12px;font-weight:400;color:var(--muted)">· ${fmt(p.stock_sugerido_unidades)} unidades</span>` : ''}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;">Si tiene en inventario hasta este valor, en los meses de prueba se cubrió la demanda de 7 de cada 10 productos.</div>
+    </div>` : ''}
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px;">
       <div class="kpi blue" style="padding:12px 14px;">

@@ -82,6 +82,12 @@ class StockSugeridoTest(unittest.TestCase):
     def test_resto_de_columnas_no_cambia(self):
         pd.testing.assert_frame_equal(self.res[self.antes.columns], self.antes)
 
+    def test_el_csv_exportado_trae_las_columnas(self):
+        csv = pd.read_csv(self.m.output_path)
+        self.assertIn("stock_sugerido", csv.columns)
+        self.assertIn("stock_sugerido_unidades", csv.columns)
+        self.assertEqual(len(csv), len(self.res))
+
     def test_guarda_cuantiles_de_los_tres_niveles(self):
         cal = self.m.calibracion_stock
         self.assertEqual(set(cal["q"]), {0.5, 0.7, 0.9})

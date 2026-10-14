@@ -264,7 +264,9 @@ def resumen_grupos(resultados, mapa, id_col, total_col):
     monto predicho (modelo y promedio), cuantos de ellos probablemente se
     venderan (se_vendera == "Si"), prediccion, ventas del mes anterior de esos
     mismos productos, variacion (fraccion; NaN sin ventas previas) y fraccion
-    del total predicho. Los codigos sin grupo van en "Sin grupo". No modifica
+    del total predicho. Los codigos sin grupo van en "Sin grupo". Si
+    'resultados' trae stock_sugerido, se agrega la columna stock_sugerido (suma
+    del stock sugerido de los productos del grupo). No modifica
     'resultados'."""
     r = resultados[resultados["ventas_predichas"].notna()]
     if len(r) == 0:
@@ -292,4 +294,7 @@ def resumen_grupos(resultados, mapa, id_col, total_col):
                               np.nan),
         "pct_total": g["pred"].to_numpy(float) / total if total else np.nan,
     })
+    if "stock_sugerido" in r.columns:
+        out["stock_sugerido"] = (r["stock_sugerido"].astype(float).groupby(grupo)
+                                 .sum().reindex(g.index).to_numpy(float))
     return out.sort_values("prediccion", ascending=False, kind="stable").reset_index(drop=True)

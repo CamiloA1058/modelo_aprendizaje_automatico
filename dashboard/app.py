@@ -148,6 +148,24 @@ def api_status():
     })
 
 
+STOCK_COLS = ("stock_sugerido", "stock_sugerido_unidades")
+
+
+def _stock_nan_a_none(registros):
+    """Los productos sin monto no tienen stock sugerido: null en el JSON (no 0)."""
+    for r in registros:
+        for k in STOCK_COLS:
+            v = r.get(k)
+            if isinstance(v, float) and np.isnan(v):
+                r[k] = None
+    return registros
+
+
+def _fillna_sin_stock(df):
+    """fillna(0) que deja en NaN las columnas de stock sugerido."""
+    return df.fillna({c: 0 for c in df.columns if c not in STOCK_COLS})
+
+
 @app.route("/api/run", methods=["POST"])
 def api_run():
     if _state["status"] == "running":
@@ -234,7 +252,8 @@ def api_summary():
 
     cols_pred = ([pred_col]
                  + (["ventas_predichas_rf"] if "ventas_predichas_rf" in df.columns else [])
-                 + (["prob_venta", "se_vendera"] if tiene_venta else []))
+                 + (["prob_venta", "se_vendera"] if tiene_venta else [])
+                 + [k for k in STOCK_COLS if k in df.columns])
     df = df_mod
 
     # Top productos por probabilidad de crecimiento
@@ -243,7 +262,7 @@ def api_summary():
             *cols_pred, c("total_sold"), "decision", "cluster"]]
         .sort_values("prob_crecimiento", ascending=False)
         .head(20)
-        .fillna(0)
+        .pipe(_fillna_sin_stock)
         .rename(columns={
             c("id"):          "CODIGO",
             c("description"): "DESCRIPCION",
@@ -251,6 +270,7 @@ def api_summary():
         })
         .to_dict(orient="records")
     )
+    top = _stock_nan_a_none(top)
 
     # Top productos con mayor probabilidad de reducción
     top_risk = (
@@ -258,7 +278,7 @@ def api_summary():
             *cols_pred, c("total_sold"), "decision", "cluster"]]
         .sort_values("prob_reduccion", ascending=False)
         .head(20)
-        .fillna(0)
+        .pipe(_fillna_sin_stock)
         .rename(columns={
             c("id"):          "CODIGO",
             c("description"): "DESCRIPCION",
@@ -266,6 +286,7 @@ def api_summary():
         })
         .to_dict(orient="records")
     )
+    top_risk = _stock_nan_a_none(top_risk)
 
     return jsonify({
         "ok":          True,
@@ -322,7 +343,7 @@ def api_products():
     })
     if "origen_estimacion" not in out.columns:
         out["origen_estimacion"] = "modelo"
-    out = out.fillna(0)
+    out = _fillna_sin_stock(out)
 
     # Grupo de producto (catálogo cargado por agregar_resumen_grupo)
     mapa = getattr(model, "mapa_grupos", None)
@@ -347,6 +368,7 @@ def api_products():
         "ventas": ("ventas_predichas", False),
         "codigo": ("CODIGO", True),
         "venta_prob": ("prob_venta", False),
+        "stock":  ("stock_sugerido", False),
     }
     col_s, asc = sort_map.get(sort_by, ("prob_crecimiento", False))
     if col_s in out.columns:
@@ -361,7 +383,7 @@ def api_products():
         "page":  page,
         "size":  size,
         "mes_predicho": _state["mes_predicho"],
-        "data":  out.to_dict(orient="records"),
+        "data":  _stock_nan_a_none(out.to_dict(orient="records")),
     })
 
 
@@ -408,7 +430,9 @@ def api_product(codigo):
     hist["fecha"] = hist["fecha"].astype(str)
 
     pred = pred_row.iloc[0].to_dict()
-    pred = {k: (0 if (isinstance(v, float) and np.isnan(v)) else v) for k, v in pred.items()}
+    pred = {k: ((None if k in STOCK_COLS else 0)
+                if (isinstance(v, float) and np.isnan(v)) else v)
+            for k, v in pred.items()}
     pred.setdefault("origen_estimacion", "modelo")
     if pred["origen_estimacion"] == "promedio":
         # Estimación por promedio: sin probabilidades ni monto del modelo.
