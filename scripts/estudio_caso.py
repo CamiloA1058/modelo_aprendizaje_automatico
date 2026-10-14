@@ -50,8 +50,9 @@ COLOR_INK = "#52514e"
 COLOR_SURFACE = "#fcfcfb"
 
 
-def evaluar_mes(mes, tmp_dir):
-    """Entrena con datos < mes, predice mes y devuelve (filas, escala, mayoritaria)."""
+def evaluar_mes(mes, tmp_dir, con_modelo=False):
+    """Entrena con datos < mes, predice mes y devuelve (filas, escala, mayoritaria);
+    con con_modelo=True devuelve ademas el modelo entrenado como cuarto valor."""
     ruta = Path(tmp_dir) / f"entrenamiento_{mes}.csv"
     with open(ruta, "w", encoding="utf-8-sig", newline="") as fh:
         n = cs.combine_training(DEFAULT_DATASET, HOLDOUT, mes, fh)
@@ -85,6 +86,8 @@ def evaluar_mes(mes, tmp_dir):
     escala = cs.naive_scale(model._df_train.loc[model._train_idx], c("id"),
                             c("total_sold"), model._top_prods)
     mayoritaria = int(model._y.iloc[model._train_idx].value_counts().idxmax())
+    if con_modelo:
+        return res, escala, mayoritaria, model
     return res, escala, mayoritaria
 
 

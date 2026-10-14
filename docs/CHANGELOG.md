@@ -1,5 +1,59 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Experimento] Mejoras de la predicción en pesos - 2026-10-13
+
+Experimento sin cambios en el modelo de producción (`model.py`, dashboard y `entrenar.py` intactos). Mide en el estudio de caso fuera de muestra (mismos meses 2026-04 a 2026-09, mismas filas y valores reales; `scripts/experimento_mejoras.py`, ayudantes puros en `src/ventas_forecast/improvements.py`, 15 pruebas nuevas) si cuatro opciones acercan la predicción en pesos a la realidad, sobre todo la suma mensual. La base reproduce `estudio_caso.csv` (MAE agrupado 314.158). El clasificador no cambia. **Nada se ajustó ni se eligió con el mes objetivo (holdout)**: los hiperparámetros de la opción 2 son fijos (HistGB Poisson: 300 iteraciones, tasa 0,05, 31 hojas, mínimo 20 por hoja; RF sin log: 200 árboles, profundidad 12) y el peso w de la opción 3 y el cuantil conformal de la opción 4 salen de la partición de prueba interna del entrenamiento de cada mes.
+
+Opciones: 1 reconciliación de arriba hacia abajo (total del mes = suma de la media_3 de los productos con predicción, repartido en proporción al RF; 1b: total = media de los últimos 3 meses de la serie agregada, idéntica a la 1 con diferencia de 0 COP en los 6 meses); 2a HistGB con pérdida Poisson y 2b RF sobre pesos crudos; 3 mezcla w·RF + (1−w)·media_3 con w elegido por MAE (3) o por el sesgo de la suma (3b) en la validación interna; 4 intervalos de 80 % del RF (4a cuantiles 10-90 de los árboles en escala log; 4b conformal dividido con los residuos de la validación interna en escala log).
+
+### Agrupado (6 meses, productos con predicción de monto)
+
+| Variante | MAE | RMSE | MASE | WAPE | Razón suma pred/real | Pred. (M COP) | Real (M COP) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Base: RF (log1p) | 314.158 | 1.026.148 | 1,2576 | 0,7284 | 0,4914 | 880,7 | 1.792,1 |
+| Media de 3 meses | 353.809 | 961.301 | 1,4163 | 0,8203 | 1,0820 | 1.939,1 | 1.792,1 |
+| Op. 1 Arriba-abajo (total media_3) | 421.761 | 1.356.077 | 1,6883 | 0,9779 | 1,0820 | 1.939,1 | 1.792,1 |
+| Op. 1b Arriba-abajo (total serie agregada) | 421.761 | 1.356.077 | 1,6883 | 0,9779 | 1,0820 | 1.939,1 | 1.792,1 |
+| Op. 2a HistGB Poisson (pesos) | 490.089 | 1.314.335 | 1,9618 | 1,1363 | 1,5928 | 2.854,4 | 1.792,1 |
+| Op. 2b RF sin log (pesos) | 540.001 | 1.371.731 | 2,1616 | 1,2520 | 1,7555 | 3.145,9 | 1.792,1 |
+| Op. 3 Mezcla, w por MAE | 314.158 | 1.026.148 | 1,2576 | 0,7284 | 0,4914 | 880,7 | 1.792,1 |
+| Op. 3b Mezcla, w por sesgo de la suma | 327.702 | 936.047 | 1,3118 | 0,7598 | 0,9071 | 1.625,5 | 1.792,1 |
+
+Pesos elegidos con la validación interna: opción 3 (MAE) w = 1,0 en los 6 meses (siempre el RF puro); opción 3b (sesgo) w = 0,4 / 0,3 / 0,2 / 0,3 / 0,3 / 0,3 para abril a septiembre.
+
+### Suma mensual predicha vs real (millones de COP)
+
+| Mes | Real | Base RF | Media_3 | Op. 1 | Op. 2a Poisson | Op. 2b RF sin log | Op. 3b |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2026-04 | 302,4 | 163,4 | 302,8 | 302,8 | 522,4 | 539,7 | 247,0 |
+| 2026-05 | 356,5 | 151,7 | 319,5 | 319,5 | 520,5 | 602,5 | 269,2 |
+| 2026-06 | 230,5 | 184,7 | 363,4 | 363,4 | 712,5 | 958,8 | 327,6 |
+| 2026-07 | 277,6 | 127,9 | 315,7 | 315,7 | 321,2 | 335,0 | 259,4 |
+| 2026-08 | 323,8 | 132,5 | 323,2 | 323,2 | 400,0 | 364,3 | 266,0 |
+| 2026-09 | 301,4 | 120,6 | 314,5 | 314,5 | 377,8 | 345,6 | 256,3 |
+| Agrupado | 1.792,1 | 880,7 | 1.939,1 | 1.939,1 | 2.854,4 | 3.145,9 | 1.625,5 |
+
+Las ventas reales de septiembre están incompletas (el holdout llega al 22).
+
+### Intervalos de 80 % del RF (opción 4)
+
+| Variante | Cobertura de productos (agrupado) | Ancho medio (COP) | Cobertura por mes |
+|---|---:|---:|---|
+| 4a Cuantiles 10-90 de los árboles | 61,4 % | 911.609 | 65,0 / 63,8 / 67,5 / 59,6 / 55,2 / 57,7 % |
+| 4b Conformal 80 % (escala log) | 81,5 % | 366.290.907 | 81,7 / 80,8 / 80,0 / 82,2 / 85,3 / 79,3 % |
+
+Total mensual: la suma de los límites inferiores y la de los superiores es una cota burda (suma de cuantiles, no cuantil de la suma). Con 4a el total real cae dentro de la cota en los 6 meses (p. ej. abril 78,0 a 786,8 M frente a 302,4 M real), pero la cota es demasiado ancha para servir; con 4b el límite superior suma 151.178,8 a 349.610,6 M por mes.
+
+### Conclusión
+
+- Solo la media_3 y la arriba-abajo dejan el total cerca de la realidad (razón 1,0820), pero la arriba-abajo empeora el error por producto (MAE 421.761 frente a 314.158 de la base y 353.809 de la media_3): el RF reparte mal el total, así que no sirve para decisiones por producto. La opción 1b es idéntica a la 1.
+- La mezcla elegida por MAE vuelve siempre al RF puro (w = 1,0): no corrige el total. La mezcla elegida por el sesgo de la suma (3b) es el mejor compromiso entre las opciones evaluadas: razón 0,9071 (suma 1.625,5 M frente a 1.792,1 M reales, contra 880,7 M de la base), MAE 327.702 (+4,3 % sobre la base) y el mejor RMSE agrupado (936.047). Aun así subestima el total en 5 de los 6 meses y lo sobrestima en junio (327,6 frente a 230,5 M), y los pesos salen de la validación interna, que es parte del mismo entrenamiento.
+- Las pérdidas sobre pesos crudos (2a, 2b) sobrestiman el total (razones 1,5928 y 1,7555) y empeoran MAE, RMSE y MASE: no ayudan.
+- Los intervalos de los árboles (4a) cubren 61,4 % frente a 80 % nominal; los conformales (4b) cubren 81,5 %, pero su ancho medio (366 M COP) los vuelve inútiles en escala de producto.
+- Una sola ventana de 6 meses, un holdout con septiembre incompleto y dependencia de una media_3 que acierta el total porque los meses fueron estables: las conclusiones son orientativas, no una validación del cambio de modelo. No se modificó el modelo de producción.
+
+Salidas (no versionadas): `outputs/reports/experimento_mejoras.txt` y `.csv`, `outputs/figures/experimento_mejoras.png`.
+
 ## [Datos] V6 sin servicios - 2026-10-13
 
 ### Decisión y regla
