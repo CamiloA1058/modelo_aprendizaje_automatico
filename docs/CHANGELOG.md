@@ -1,5 +1,39 @@
 # 📝 CHANGELOG - Control de Versiones
 
+## [Evaluación] Estudio de caso fuera de muestra (origen rodante) - 2026-10-13
+
+`scripts/estudio_caso.py` (con los ayudantes probados de `src/ventas_forecast/case_study.py` y `tests/test_case_study.py`) evalúa el procedimiento desplegado mes a mes con ventas reales posteriores al entrenamiento (`data/holdout/ventas_2026_04_09.csv`, de 2026-03-28 a 2026-09-22). Para cada mes objetivo M (2026-04 a 2026-09) se entrena `SalesForecastModel` con la V6 más el holdout estrictamente anterior a M, con los valores por defecto del dashboard (crecimiento 1,15; reducción 0,90; k = 3; `min_months` = 6; `top_n_products` = 1900), se predice M como lo hace `entrenar.py` y se compara con las ventas reales de M. La clase real se construye con la regla de las etiquetas de entrenamiento (ventas reales de M / ventas del mes anterior; un mes sin ventas implica Reducir). La línea base siempre predice Reducir (clase mayoritaria del entrenamiento de cada mes). Los meses del holdout nunca se usaron para elegir k ni los hiperparámetros. Salidas: `outputs/reports/estudio_caso.txt` y `.csv`, `outputs/figures/estudio_caso.png`. Las ventas de septiembre están incompletas (el holdout llega al 22).
+
+**Decisiones (F1 macro / accuracy balanceada / accuracy; entre paréntesis la línea base mayoritaria)**
+
+| Mes | n | F1 macro | Acc. balanceada | Accuracy |
+|---|---:|---:|---:|---:|
+| 2026-04 | 699 | 0,3785 (0,2510) | 0,4230 (0,3333) | 0,5150 (0,6037) |
+| 2026-05 | 762 | 0,4451 (0,2553) | 0,4708 (0,3333) | 0,5564 (0,6207) |
+| 2026-06 | 766 | 0,3521 (0,2827) | 0,4371 (0,3333) | 0,5039 (0,7363) |
+| 2026-07 | 727 | 0,4663 (0,2496) | 0,4866 (0,3333) | 0,6107 (0,5983) |
+| 2026-08 | 761 | 0,4358 (0,2498) | 0,4493 (0,3333) | 0,5848 (0,5992) |
+| 2026-09 | 858 | 0,4415 (0,2783) | 0,4812 (0,3333) | 0,6119 (0,7168) |
+| Agrupado | 4.573 | 0,4228 (0,2622) | 0,4570 (0,3333) | 0,5651 (0,6484) |
+
+Matriz de confusión agrupada (filas = real; orden Reducir, Mantener, Reforzar): [1541, 137, 1287], [79, 24, 170], [253, 63, 1019].
+
+**Montos (productos con predicción de monto; MAE y RMSE en COP)**
+
+| Mes | n | MAE modelo / ingenuo / media_3 | MASE modelo / ingenuo / media_3 | Suma pred./real: modelo / ingenuo / media_3 |
+|---|---:|---|---|---|
+| 2026-04 | 647 | 359.108 / 485.821 / 345.090 | 1,5816 / 2,1397 / 1,5199 | 0,5927 / 1,1565 / 0,9805 |
+| 2026-05 | 711 | 357.725 / 461.459 / 393.584 | 1,4936 / 1,9268 / 1,6434 | 0,4921 / 1,1006 / 0,9064 |
+| 2026-06 | 691 | 259.341 / 560.997 / 361.622 | 1,0477 / 2,2662 / 1,4608 | 0,8662 / 2,1010 / 1,5864 |
+| 2026-07 | 666 | 324.761 / 397.466 / 368.163 | 1,2623 / 1,5449 / 1,4310 | 0,5031 / 0,9506 / 1,1015 |
+| 2026-08 | 680 | 377.686 / 440.465 / 395.473 | 1,4047 / 1,6382 / 1,4709 | 0,4498 / 1,1336 / 0,9778 |
+| 2026-09 | 771 | 287.783 / 416.993 / 319.219 | 1,0357 / 1,5007 / 1,1489 | 0,4567 / 1,3302 / 1,0416 |
+| Agrupado | 4.166 | 326.665 / 459.866 / 363.233 | 1,2879 / 1,8131 / 1,4321 | 0,5446 / 1,2572 / 1,0714 |
+
+RMSE agrupado: modelo 1.054.010, ingenuo 1.233.164, media_3 990.914.
+
+**Lectura**: las decisiones superan a la línea base mayoritaria en F1 macro y en accuracy balanceada todos los meses (pierden en accuracy en cinco de seis, como en la prueba interna); el F1 macro agrupado (0,4228) es algo menor que el de la prueba interna (0,4507). El MAE del modelo es menor que el del ingenuo todos los meses y menor que el de media_3 en cinco de seis (abril es la excepción); la media_3 tiene menor RMSE en el agrupado. El MASE queda sobre 1 todos los meses. La suma predicha es entre 0,45 y 0,87 de la real (agrupada 0,5446): el sesgo a la baja del regresor entrenado en log1p persiste fuera de muestra, y la media_3 y el ingenuo no lo tienen.
+
 ## [Datos] V6: solo facturas de venta - 2026-10-13
 
 ### Problema
