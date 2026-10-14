@@ -45,6 +45,7 @@ from ventas_forecast import eligibility as el
 from ventas_forecast import grupos
 from ventas_forecast import improvements as im
 from ventas_forecast import sale_probability as sp
+from ventas_forecast import stock_sugerido as ss
 from ventas_forecast.data.cleaning import remove_bulk_adjustments
 from ventas_forecast.paths import DATA_RAW, DEFAULT_PREDICTION
 
@@ -156,6 +157,19 @@ class SalesForecastModel:
                           y lo deja en resumen_grupos. Solo lee los
                           resultados: no cambia ninguna prediccion, decision
                           ni total. Con False no se calcula.
+    stock_sugerido      : True por defecto (produccion). Tras
+                          agregar_probabilidad_venta(), agregar_stock_sugerido()
+                          escribe stock_sugerido (COP) y, con precio conocido,
+                          stock_sugerido_unidades: un nivel "order-up-to" tal
+                          que la demanda del mes queda cubierta en una fraccion
+                          nivel_servicio de los casos. Corrige la prediccion
+                          con el cuantil de los residuos log1p(real) -
+                          log1p(pred) de la validacion interna, por cubeta de
+                          prob_venta (ver ventas_forecast.stock_sugerido).
+                          Solo agrega columnas: no cambia decisiones, montos,
+                          totales ni prob_venta. Con False la salida es la de
+                          antes del paso.
+    nivel_servicio      : nivel de servicio del stock sugerido (default 0,70).
     """
 
     def __init__(
@@ -181,6 +195,8 @@ class SalesForecastModel:
         probabilidad_venta=True,
         resumen_por_grupo=True,
         grupos_path=None,
+        stock_sugerido=True,
+        nivel_servicio=0.70,
     ):
         self.filepath        = Path(filepath)
         self.sep             = sep
@@ -206,6 +222,12 @@ class SalesForecastModel:
         self.probabilidad_venta = probabilidad_venta
         self.resumen_por_grupo = resumen_por_grupo
         self.grupos_path = Path(grupos_path) if grupos_path else DATA_RAW / "grupos_productos.csv"
+        self.stock_sugerido = stock_sugerido
+        self.nivel_servicio = nivel_servicio
+        # Poblados por agregar_stock_sugerido()
+        self.calibracion_stock = None
+        self.stock_validacion = None
+        self._sale_val = None
         # Poblados por agregar_resumen_grupo()
         self.resumen_grupos = None
         self.mapa_grupos = None
@@ -1159,6 +1181,19 @@ class SalesForecastModel:
         self.sale_val_accuracy = acc_val
         self._sale_n_train = len(tr)
         self._sale_n_val = len(te)
+        # Validacion interna con probabilidad fuera de muestra (la usa
+        # agregar_stock_sugerido para calibrar por cubeta de prob_venta).
+        fv = frame.iloc[te]
+        self._sale_val = pd.DataFrame({
+            "id": fv[c("id")].to_numpy(),
+            "fecha": fv["fecha"].to_numpy(),
+            "actual": fv[c("total_sold")].to_numpy(float),
+            "media_3": fv["media_3_actual"].to_numpy(float),
+            "target": fv["target"].to_numpy(float),
+            "meses_con_venta": np.rint(
+                fv["frac_hist"].to_numpy(float) * (fv["edad_meses"].to_numpy(float) + 1)),
+            "prob": p_val,
+        })
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.results.to_csv(self.output_path, index=False)
@@ -1166,6 +1201,97 @@ class SalesForecastModel:
         print(f"[✓] Probabilidad de venta: umbral {umbral:.2f}, exactitud de "
               f"validación interna {acc_val:.1%}; {n_si:,} de {len(res):,} "
               f"productos se venderán")
+
+    # ── 7e. STOCK SUGERIDO (nivel de servicio por producto) ──────────────────
+    def _validacion_stock(self):
+        """Residuos de la validacion interna (nunca el mes a predecir ni un
+        holdout). Productos del modelo: filas de prueba del regresor (top
+        productos, objetivo conocido) con la prediccion de produccion
+        w*RF + (1-w)*media_3. Productos por promedio: filas de la validacion
+        del clasificador de venta con el mes actual en cero, media_3 > 0,
+        >= min_months meses con ventas y top producto, con prediccion
+        media_3. La probabilidad de venta es la fuera de muestra de esa
+        misma validacion (NaN si la fila no esta en ella o no hay modelo de
+        venta). Devuelve un DataFrame id, fecha, origen, prob, pred, real,
+        resid."""
+        c = self._c
+        cols = ["id", "fecha", "origen", "prob", "pred", "real"]
+        partes = []
+        test = self._df_train.loc[self._test_idx]
+        test = test[test[c("id")].isin(self._top_prods) & test["target"].notna()]
+        if len(test):
+            rf = np.expm1(self.reg.predict(self.scaler.transform(self._X.loc[test.index])))
+            m3 = test["media_3_actual"].to_numpy(float)
+            m3 = np.where(np.isnan(m3), test[c("total_sold")].to_numpy(float), m3)
+            w = 1.0 if self.blend_weight is None else self.blend_weight
+            partes.append(pd.DataFrame({
+                "id": test[c("id")].to_numpy(), "fecha": test["fecha"].to_numpy(),
+                "origen": "modelo", "prob": np.nan,
+                "pred": im.blend(w, rf, m3), "real": test["target"].to_numpy(float),
+            }))
+        sv = self._sale_val
+        if sv is not None and len(sv):
+            if partes:
+                llave = sv.set_index(["id", "fecha"])["prob"]
+                llave = llave[~llave.index.duplicated()]
+                idx = pd.MultiIndex.from_arrays(
+                    [partes[0]["id"], partes[0]["fecha"]])
+                partes[0]["prob"] = llave.reindex(idx).to_numpy(float)
+            if self.estimacion_por_promedio:
+                p = sv[(sv["actual"] <= 0) & (sv["media_3"] > 0)
+                       & (sv["meses_con_venta"] >= self.min_months)
+                       & sv["id"].isin(self._top_prods) & sv["target"].notna()]
+                if len(p):
+                    partes.append(pd.DataFrame({
+                        "id": p["id"].to_numpy(), "fecha": p["fecha"].to_numpy(),
+                        "origen": "promedio", "prob": p["prob"].to_numpy(float),
+                        "pred": p["media_3"].to_numpy(float),
+                        "real": p["target"].to_numpy(float),
+                    }))
+        val = (pd.concat(partes, ignore_index=True) if partes
+               else pd.DataFrame({k: [] for k in cols}))
+        val["resid"] = ss.residuos_log(val["real"], val["pred"])
+        return val
+
+    def agregar_stock_sugerido(self):
+        """
+        Escribe en self.results stock_sugerido (COP) y stock_sugerido_unidades
+        para los productos con monto predicho: la cota superior a nivel de
+        servicio nivel_servicio, expm1(log1p(pred) + q), donde q es el cuantil
+        de los residuos log1p(real) - log1p(pred) de la validacion interna
+        (ver _validacion_stock) por cubeta de prob_venta. Sin probabilidad de
+        venta se usa el cuantil global. Las unidades son el techo del stock
+        entre el ultimo precio promedio conocido. Guarda calibracion_stock
+        (cuantiles de 0,5 / 0,7 / 0,9 y el nivel elegido) y stock_validacion.
+        No cambia ninguna otra columna. Con stock_sugerido=False no hace nada.
+        """
+        if not self.stock_sugerido:
+            return
+        c = self._c
+        val = self._validacion_stock()
+        niveles = sorted(set(ss.NIVELES) | {float(self.nivel_servicio)})
+        cal = ss.calibrar(val["prob"], val["resid"], niveles=niveles)
+        res = self.results.copy()
+        pred = res["ventas_predichas"].to_numpy(float)
+        if "prob_venta" in res.columns:
+            prob = res["prob_venta"].to_numpy(float)
+        else:
+            prob = np.full(len(res), np.nan)
+        q = ss.cuantiles_para(cal, prob, float(self.nivel_servicio))
+        stock = ss.cota_superior(pred, q)
+        res["stock_sugerido"] = stock
+        precio = (res[c("avg_price")].to_numpy(float)
+                  if c("avg_price") in res.columns else np.full(len(res), np.nan))
+        res["stock_sugerido_unidades"] = ss.unidades(stock, precio)
+        self.results = res
+        self.calibracion_stock = cal
+        self.stock_validacion = val
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.results.to_csv(self.output_path, index=False)
+        print(f"[✓] Stock sugerido (nivel {self.nivel_servicio:.0%}): "
+              f"{int(np.isfinite(stock).sum()):,} productos; calibrado con "
+              f"{cal['n_total']:,} residuos de validación interna "
+              f"({len(cal['n'])} cubetas de probabilidad de venta)")
 
     # ── 7d. RESUMEN POR GRUPO DE PRODUCTO (suma de predicciones) ─────────────
     def agregar_resumen_grupo(self):
@@ -1259,6 +1385,7 @@ class SalesForecastModel:
         self.predict_next_month()
         self.estimar_por_promedio()
         self.agregar_probabilidad_venta()
+        self.agregar_stock_sugerido()
         self.agregar_resumen_grupo()
         self.plot()
         return self.results
