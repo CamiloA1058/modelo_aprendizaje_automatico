@@ -139,5 +139,53 @@ class ResumenGruposStockTest(unittest.TestCase):
         self.assertNotIn("Y", t.index)
 
 
+class PipelineDelDashboardTest(unittest.TestCase):
+    """_run_model ejecuta el paso de stock sugerido entre la probabilidad de
+    venta y el resumen por grupo, y respeta los parametros del formulario."""
+
+    def _correr(self, params):
+        from unittest import mock
+        modelo = mock.MagicMock()
+        modelo._c = lambda rol: rol
+        modelo.metrics = {"accuracy": .5, "precision": .5, "recall": .5, "f1": .5}
+        modelo.sale_threshold, modelo.sale_val_accuracy = 0.5, 0.7
+        modelo._mes_pred = pd.Timestamp("2026-04-01")
+        modelo._ultimo_mes = pd.Timestamp("2026-03-01")
+        modelo.probabilidad_venta = True
+        modelo.resumen_por_grupo = True
+        modelo.results = pd.DataFrame({"a": [1]})
+        modelo.df = pd.DataFrame({"id": ["A"]})
+        modelo.df_predict = pd.DataFrame({"a": [1]})
+        clase = mock.MagicMock(return_value=modelo)
+        saved = dict(dashboard_app._state)
+        try:
+            with mock.patch.object(dashboard_app, "SalesForecastModel", clase):
+                dashboard_app._run_model("x.csv", None, params)
+            return clase, modelo, dashboard_app._state["status"]
+        finally:
+            dashboard_app._state.clear()
+            dashboard_app._state.update(saved)
+
+    def test_ejecuta_el_paso_en_orden(self):
+        clase, modelo, estado = self._correr({})
+        self.assertEqual(estado, "done")
+        nombres = [c[0] for c in modelo.method_calls]
+        self.assertIn("agregar_stock_sugerido", nombres)
+        self.assertLess(nombres.index("agregar_probabilidad_venta"),
+                        nombres.index("agregar_stock_sugerido"))
+        self.assertLess(nombres.index("agregar_stock_sugerido"),
+                        nombres.index("agregar_resumen_grupo"))
+        kw = clase.call_args.kwargs
+        self.assertTrue(kw["stock_sugerido"])
+        self.assertEqual(kw["nivel_servicio"], 0.70)
+
+    def test_parametros_del_formulario(self):
+        clase, modelo, _ = self._correr({"stock_sugerido": "false",
+                                         "nivel_servicio": "0.8"})
+        kw = clase.call_args.kwargs
+        self.assertFalse(kw["stock_sugerido"])
+        self.assertEqual(kw["nivel_servicio"], 0.8)
+
+
 if __name__ == "__main__":
     unittest.main()

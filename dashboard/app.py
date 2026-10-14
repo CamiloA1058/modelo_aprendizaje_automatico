@@ -81,6 +81,9 @@ def _run_model(filepath, col_map, params):
                 params.get("probabilidad_venta", "true")).lower() != "false",
             resumen_por_grupo=str(
                 params.get("resumen_por_grupo", "true")).lower() != "false",
+            stock_sugerido=str(
+                params.get("stock_sugerido", "true")).lower() != "false",
+            nivel_servicio=float(params.get("nivel_servicio", 0.70)),
         )
 
         _log("✔ Cargando y limpiando datos…")
@@ -119,6 +122,10 @@ def _run_model(filepath, col_map, params):
             model.agregar_probabilidad_venta()
             _log(f"  → Umbral {model.sale_threshold:.2f} | exactitud de validación "
                  f"interna {model.sale_val_accuracy:.1%}")
+
+        if model.stock_sugerido:
+            _log("✔ Calculando el stock sugerido de cada producto…")
+            model.agregar_stock_sugerido()
 
         if model.resumen_por_grupo:
             _log("✔ Sumando las predicciones por grupo de producto…")

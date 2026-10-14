@@ -1292,6 +1292,11 @@ class SalesForecastModel:
               f"{int(np.isfinite(stock).sum()):,} productos; calibrado con "
               f"{cal['n_total']:,} residuos de validación interna "
               f"({len(cal['n'])} cubetas de probabilidad de venta)")
+        for i, n in enumerate(cal["n"]):
+            q = cal["q"][float(self.nivel_servicio)][i]
+            print(f"    prob_venta [{cal['edges'][i]:.1f}-{cal['edges'][i + 1]:.1f}): "
+                  f"n={n:,}, cuantil {self.nivel_servicio:.0%} de log1p(real) - "
+                  f"log1p(pred) = {q:+.3f}")
 
     # ── 7d. RESUMEN POR GRUPO DE PRODUCTO (suma de predicciones) ─────────────
     def agregar_resumen_grupo(self):
