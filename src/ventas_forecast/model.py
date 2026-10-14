@@ -41,6 +41,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
 )
 
+from ventas_forecast import improvements as im
 from ventas_forecast.data.cleaning import remove_bulk_adjustments
 from ventas_forecast.paths import DEFAULT_PREDICTION
 
@@ -172,6 +173,9 @@ class SalesForecastModel:
         self.reg_metrics      = {}   # métricas del regresor sobre prueba (train_regressor)
         self.baseline_metrics = {}   # métricas de los baselines ingenuo/media_3 (train_regressor)
         self.reg_test_results = None  # real vs predicho en prueba (train_regressor)
+        self.reg_test_media_3 = None  # media_3 de las filas de prueba (train_regressor)
+        self.blend_weight  = None     # w de la mezcla w*RF + (1-w)*media_3 (train_regressor)
+        self.blend_metrics = {}       # métricas de la mezcla sobre prueba (train_regressor)
         self.tuning_results  = None   # tabla completa de GridSearchCV (tune_classifier)
         self.best_clf_params = None   # mejores hiperparámetros encontrados
         self._features    = None
@@ -826,6 +830,26 @@ class SalesForecastModel:
             "media_3": self._regression_metrics(y_true, pred_media_3, scale),
         }
 
+        # ── Mezcla w*RF + (1-w)*media_3 ──────────────────────────────────────
+        # El RF entrenado en log1p subestima el total en pesos (ratio de la
+        # suma predicha / real < 1). w se elige SOLO con la partición de
+        # prueba interna de este entrenamiento (sin datos del mes objetivo ni
+        # de ningún holdout), minimizando |suma(pred) - suma(real)|.
+        self.reg_test_media_3 = pred_media_3
+        self.blend_weight = im.choose_blend_weight(
+            y_true, y_pred, pred_media_3, criterion="sesgo")
+        pred_blend = im.blend(self.blend_weight, y_pred, pred_media_3)
+        total_real = float(np.sum(y_true))
+
+        def _ratio(pred):
+            return (round(float(np.sum(pred)) / total_real, 4)
+                    if total_real else float("nan"))
+
+        self.reg_metrics["sum_ratio"] = _ratio(y_pred)
+        self.blend_metrics = self._regression_metrics(y_true, pred_blend, scale)
+        self.blend_metrics["sum_ratio"] = _ratio(pred_blend)
+        self.blend_metrics["w"] = self.blend_weight
+
         print(f"[✓] Regresor entrenado (top {self.top_n_products} productos, "
               f"{len(df_reg_train):,} filas de entrenamiento, "
               f"{len(df_reg_test):,} filas de prueba)")
@@ -840,6 +864,10 @@ class SalesForecastModel:
                 f"{self.baseline_metrics['media_3'][k]:<14}"
             )
         print(f"n_test: {self.reg_metrics['n_test']:,}")
+        print(f"Mezcla w*RF + (1-w)*media_3: w={self.blend_weight}, "
+              f"MAE={self.blend_metrics['mae']}, "
+              f"razón de sumas={self.blend_metrics['sum_ratio']} "
+              f"(RF {self.reg_metrics['sum_ratio']})")
 
     # ── 7. PREDICCIÓN REAL DEL MES SIGUIENTE ─────────────────────────────────
     def predict_next_month(self):
@@ -872,9 +900,18 @@ class SalesForecastModel:
             pred_sales_log = self.reg.predict(
                 self.scaler.transform(X_pred.loc[mask_top[mask_top].index])
             )
-            df_pred.loc[mask_top[mask_top].index, "ventas_predichas"] = (
-                np.expm1(pred_sales_log)
-            )
+            idx_top = mask_top[mask_top].index
+            rf_pred = np.expm1(pred_sales_log)
+            df_pred.loc[idx_top, "ventas_predichas_rf"] = rf_pred
+
+            # Mezcla del sistema: w*RF + (1-w)*media_3; media_3 faltante →
+            # ventas del mes actual; sin w (modelo no entrenado) → RF puro.
+            m3 = df_pred.loc[idx_top, "media_3_actual"].to_numpy(dtype=float)
+            m3 = np.where(np.isnan(m3),
+                          df_pred.loc[idx_top, c("total_sold")].to_numpy(dtype=float), m3)
+            m3 = np.where(np.isnan(m3), rf_pred, m3)
+            w = 1.0 if self.blend_weight is None else self.blend_weight
+            df_pred.loc[idx_top, "ventas_predichas"] = im.blend(w, rf_pred, m3)
 
         # Mes predicho
         df_pred["mes_predicho"] = self._mes_pred.strftime("%Y-%m")
@@ -884,7 +921,8 @@ class SalesForecastModel:
             c("id"), c("description"),
             "mes_predicho",
             c("total_sold"),          # ventas del último mes (base de comparación)
-            "ventas_predichas",       # predicción cuantitativa
+            "ventas_predichas",       # predicción cuantitativa (mezcla modelo + media_3)
+            "ventas_predichas_rf",    # predicción cuantitativa solo del RF
             "prob_crecimiento",       # probabilidad de Reforzar
             "prob_reduccion",         # probabilidad de Reducir
             "decision",               # recomendación: Reforzar / Mantener / Reducir
