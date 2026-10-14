@@ -1049,6 +1049,11 @@ function closeDetailOverlay(e) {
   if (d.status === 'done') {
     setSidebarStatus('done', d.mes_predicho);
     loadSummary();
+    // Enlace directo a una vista: /#grupos, /#productos
+    const vista = location.hash.replace('#', '');
+    if (vista === 'grupos' || vista === 'productos') {
+      nav(document.querySelector(`.nav-item[onclick*="'${vista}'"]`), vista);
+    }
   }
 })();
 </script>

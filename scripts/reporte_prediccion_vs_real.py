@@ -8,7 +8,9 @@ Lista por producto de la prediccion del algoritmo frente a las ventas reales.
   2026-03-31); lo real sale de data/holdout/ventas_2026_04_09.csv.
 - Una hoja por mes del estudio de caso (2026-04 a 2026-09) con origen rodante
   (scripts/estudio_caso.py: se entrena solo con datos anteriores a cada mes).
-- "Resumen" con totales por mes y "Cómo leer" con la explicacion de columnas.
+- "Resumen" con totales por mes, "Grupos" (suma de las predicciones por grupo de
+  producto frente a lo real, con el acierto ponderado por valor de cada mes) y
+  "Cómo leer" con la explicacion de columnas.
 
 Incluye la estimacion por promedio (productos sin ventas el ultimo mes) y no
 contiene datos de clientes.
@@ -33,9 +35,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import estudio_caso as ec  # noqa: E402
 from ventas_forecast import case_study as cs  # noqa: E402
+from ventas_forecast import grupos as gr  # noqa: E402
 from ventas_forecast import prediccion_vs_real as pr  # noqa: E402
 from ventas_forecast.model import SalesForecastModel  # noqa: E402
-from ventas_forecast.paths import DEFAULT_DATASET, REPORTS, ensure_output_dirs  # noqa: E402
+from ventas_forecast.paths import DATA_RAW, DEFAULT_DATASET, REPORTS, ensure_output_dirs  # noqa: E402
 
 NOMBRES_MES = {
     "2026-04": "Abril 2026", "2026-05": "Mayo 2026", "2026-06": "Junio 2026",
@@ -104,6 +107,18 @@ COMO_LEER = [
                     "vendió."),
     ("¿Acertó venta?", "Sí si la predicción \"¿Se venderá?\" coincide con lo que pasó "
                        "(\"¿Se vendió?\")."),
+    ("Grupos", "Compara, por grupo de producto (la línea o proveedor con la que se compra), "
+               "la suma de las predicciones de sus productos con lo que realmente vendieron "
+               "esos mismos productos en el mes. Solo cuentan los productos con monto "
+               "predicho (modelo y promedio), los mismos del dashboard; los productos sin "
+               "grupo van en \"Sin grupo\". Acierto % = 1 menos el valor absoluto de "
+               "(real − predicción) dividido entre el real, entre 0 y 100 % (vacío si el "
+               "real es 0). La parte de arriba resume cada mes y el total de los seis "
+               "meses (\"Agrupado\"): el acierto ponderado es 1 menos la suma de los "
+               "errores absolutos de todos los grupos dividida entre la suma de lo real, "
+               "es decir, qué parte del valor vendido se acertó. Debajo está el detalle "
+               "por grupo y mes. Los meses con una caída fuerte de las ventas reales "
+               "(junio) bajan el acierto de todos los grupos."),
     ("Resumen", "Totales por mes: predicho por el modelo, por promedio y total, frente a lo "
                 "real; cobertura frente a lo real de los 1.900 productos con más ventas; "
                 "porcentaje de decisiones acertadas y error medio absoluto (MAE). "
@@ -207,6 +222,43 @@ def escribir_resumen(ws, resumen):
         "sin monto."))
 
 
+def escribir_grupos(ws, resumen, detalle):
+    """Resumen mensual del acierto por grupo y debajo el detalle por mes y grupo."""
+    from openpyxl.styles import Alignment, Font
+    resumen = pd.DataFrame(resumen)
+    ws.append(list(resumen.columns))
+    for fila in resumen.itertuples(index=False, name=None):
+        ws.append([_valor(v) for v in fila])
+    n_resumen = ws.max_row
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(wrap_text=True, vertical="center")
+    for row in range(2, n_resumen + 1):
+        ws.cell(row=row, column=3).number_format = "#,##0"
+        ws.cell(row=row, column=4).number_format = "#,##0"
+        ws.cell(row=row, column=5).number_format = "0.0%"
+    for cell in ws[n_resumen]:
+        cell.font = Font(bold=True)
+    ws.append([])
+    ws.append(["Detalle por grupo"])
+    ws.cell(row=ws.max_row, column=1).font = Font(bold=True, size=12)
+    cab = ["Mes"] + list(pr.COLUMNAS_GRUPO)
+    ws.append(cab)
+    for cell in ws[ws.max_row]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(wrap_text=True, vertical="center")
+    inicio = ws.max_row + 1
+    for mes, t in detalle.items():
+        for fila in t.itertuples(index=False, name=None):
+            ws.append([mes] + [_valor(v) for v in fila])
+    for row in range(inicio, ws.max_row + 1):
+        for col in (4, 5, 6):
+            ws.cell(row=row, column=col).number_format = "#,##0"
+        ws.cell(row=row, column=7).number_format = "0.0%"
+    for letra, ancho in zip("ABCDEFG", (34, 12, 19, 19, 22, 12, 12)):
+        ws.column_dimensions[letra].width = ancho
+
+
 def escribir_como_leer(ws):
     from openpyxl.styles import Alignment, Font
     ws.column_dimensions["A"].width = 30
@@ -245,6 +297,7 @@ def main():
 
     ensure_output_dirs()
     tablas, resumen = {}, []
+    mapa = gr.cargar_mapa(DATA_RAW / "grupos_productos.csv")
     with tempfile.TemporaryDirectory() as tmp:
         abril = entrenar_abril(tmp)
         tabla, real_top = tabla_de_modelo(abril, "2026-04")
@@ -262,6 +315,9 @@ def main():
     escribir_como_leer(wb.active)
     wb.active.title = "Cómo leer"
     escribir_resumen(wb.create_sheet("Resumen"), resumen)
+    por_grupo = {m: pr.tabla_grupos_mes(t, mapa) for m, t in tablas.items()}
+    resumen_grupos = pr.resumen_grupos(por_grupo)
+    escribir_grupos(wb.create_sheet("Grupos"), resumen_grupos, por_grupo)
     for mes, tabla in tablas.items():
         escribir_hoja(wb.create_sheet(NOMBRES_MES[mes]), tabla)
     xlsx = REPORTS / "prediccion_vs_real.xlsx"
@@ -276,6 +332,7 @@ def main():
             shutil.copy2(f, destino / f.name)
         print(f"[OK] copiado a {destino}")
     print(pd.DataFrame(resumen).T.to_string())
+    print(resumen_grupos.to_string())
 
 
 if __name__ == "__main__":
