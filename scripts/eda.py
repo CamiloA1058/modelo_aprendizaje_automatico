@@ -45,31 +45,17 @@ from ventas_forecast.eda import (  # noqa: E402
 )
 
 from ventas_forecast.model import SalesForecastModel, DEFAULT_COL_MAP  # noqa: E402
+from ventas_forecast.figuras import (  # noqa: E402
+    ANCHO, COLOR_GRID, COLOR_INK, COLOR_MUTED, COLOR_SURFACE, FUENTE, MESES_ES,
+    aplicar_estilo, estilo_ejes, fmt_es, formateador_es,
+)
 
 # ── Paleta (misma referencia usada en el resto del proyecto) ────────────────
 COLOR_LINEA   = "#008300"   # Figura de ventas mensuales
 COLOR_ESTACION = "#eb6834"  # Figura de estacionalidad
 COLOR_PARETO   = "#199e70"  # Figura de Pareto ABC
 COLOR_HIST     = "#4a3aa7"  # Figura de distribución de ventas
-COLOR_GRID    = "#e1e0d9"
-COLOR_INK     = "#52514e"
-COLOR_MUTED   = "#898781"
-COLOR_SURFACE = "#fcfcfb"
 COLOR_FILL_A  = "#f0efec"
-
-MESES_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
-            "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-
-
-def _estilo_ejes(ax, fig):
-    """Aplica el estilo compartido de las 4 figuras (fondo, grid, ejes)."""
-    fig.patch.set_facecolor(COLOR_SURFACE)
-    ax.set_facecolor(COLOR_SURFACE)
-    ax.tick_params(colors=COLOR_INK, labelsize=9)
-    ax.xaxis.label.set_color(COLOR_INK)
-    ax.yaxis.label.set_color(COLOR_INK)
-    for spine in ax.spines.values():
-        spine.set_color(COLOR_GRID)
 
 
 def main():
@@ -321,146 +307,134 @@ def main():
     salida_txt.write_text(resumen_txt, encoding="utf-8")
     print(f"\n[✓] Reporte exportado -> {salida_txt}")
 
-    # ── Figura a: ventas mensuales totales ──────────────────────────────────
+    # ── Figuras ──────────────────────────────────────────────────────────────
+    aplicar_estilo()
+    figura_ventas_mensuales(mensual, primer_mes_parcial, ultimo_mes_parcial)
+    figura_estacionalidad(perfil_estacional)
+    figura_pareto(tabla_abc, resumen_abc)
+    positivos = model.df.loc[model.df[c("total_sold")] > 0, c("total_sold")].to_numpy()
+    figura_distribucion(positivos, intermit["share_zero_overall"])
+
+    print(f"\n[✓] Tiempo total: {elapsed:.1f} s")
+
+
+def _guardar(fig, nombre):
+    salida = FIGURES / nombre
+    fig.savefig(salida, dpi=200, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    print(f"[✓] Figura exportada -> {salida}")
+
+
+def figura_ventas_mensuales(mensual, primer_mes_parcial, ultimo_mes_parcial):
+    """Ventas totales por mes (millones de COP); marcador hueco en meses incompletos."""
     x = mensual.index
     y = mensual.to_numpy() / 1e6
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    _estilo_ejes(ax, fig)
-    ax.plot(x, y, color=COLOR_LINEA, linewidth=2, marker="o", markersize=4.5,
-            markerfacecolor=COLOR_LINEA, markeredgecolor=COLOR_LINEA)
-
-    # Primer y último mes: marcador hueco si son meses parciales (día crudo
-    # distinto de 1 o del último día del mes, ver sección 1 del reporte).
+    fig, ax = plt.subplots(figsize=(ANCHO, 4.6))
+    estilo_ejes(ax)
+    ax.plot(x, y, color=COLOR_LINEA, linewidth=2, marker="o", markersize=5)
+    parciales = []
     if primer_mes_parcial:
-        ax.plot(x[0], y[0], marker="o", markersize=7, markerfacecolor=COLOR_SURFACE,
-                markeredgecolor=COLOR_LINEA, markeredgewidth=1.6, zorder=5)
+        parciales.append(0)
     if ultimo_mes_parcial:
-        ax.plot(x[-1], y[-1], marker="o", markersize=7, markerfacecolor=COLOR_SURFACE,
-                markeredgecolor=COLOR_LINEA, markeredgewidth=1.6, zorder=5)
+        parciales.append(len(x) - 1)
+    if parciales:
+        ax.plot([x[i] for i in parciales], [y[i] for i in parciales], linestyle="none",
+                marker="o", markersize=8, markerfacecolor=COLOR_SURFACE,
+                markeredgecolor=COLOR_LINEA, markeredgewidth=1.8, zorder=5,
+                label="Mes incompleto")
+        ax.legend(frameon=False, loc="upper left")
 
-    ax.grid(axis="y", color=COLOR_GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
+    pos = list(range(0, len(x), 3))
+    ax.set_xticks([x[i] for i in pos])
+    ax.set_xticklabels([f"{MESES_ES[x[i].month - 1]} {x[i].year % 100:02d}" for i in pos],
+                       rotation=45, ha="right")
+    ax.set_ylim(bottom=0)
+    ax.yaxis.set_major_formatter(formateador_es(0))
     ax.set_xlabel("Mes")
     ax.set_ylabel("Ventas (millones de COP)")
-    fig.autofmt_xdate(rotation=45)
-    if primer_mes_parcial or ultimo_mes_parcial:
-        fig.text(0.5, 0.005, "○ Mes incompleto (primer y/o último mes del histórico)",
-                  ha="center", fontsize=8, color=COLOR_MUTED)
-        fig.tight_layout(rect=(0, 0.05, 1, 1))
-    else:
-        fig.tight_layout()
-
-    salida_a = FIGURES / "eda_ventas_mensuales.png"
-    fig.savefig(salida_a, dpi=200, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    print(f"[✓] Figura exportada -> {salida_a}")
-
-    # ── Figura b: estacionalidad (promedio por mes calendario) ──────────────
-    valores = (perfil_estacional["promedio"].to_numpy() / 1e6)
-    valores_plot = np.nan_to_num(valores, nan=0.0)
-    n_anios_plot = perfil_estacional["n_anios"].to_numpy()
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    _estilo_ejes(ax, fig)
-    barras = ax.bar(MESES_ES, valores_plot, color=COLOR_ESTACION, width=0.7)
-    ax.set_ylim(bottom=0)
-    ax.grid(axis="y", color=COLOR_GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-    ax.set_xlabel("Mes")
-    ax.set_ylabel("Ventas promedio (millones de COP)")
-
-    y_max = valores_plot.max() if valores_plot.max() > 0 else 1.0
-    ax.set_ylim(top=y_max * 1.18)
-    for barra, n in zip(barras, n_anios_plot):
-        ax.annotate(f"n={int(n)}", (barra.get_x() + barra.get_width() / 2,
-                    barra.get_height()), textcoords="offset points",
-                    xytext=(0, 4), ha="center", fontsize=7.5, color=COLOR_MUTED)
-
     fig.tight_layout()
-    salida_b = FIGURES / "eda_estacionalidad.png"
-    fig.savefig(salida_b, dpi=200, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    print(f"[✓] Figura exportada -> {salida_b}")
+    _guardar(fig, "eda_ventas_mensuales.png")
 
-    # ── Figura c: Pareto / curva ABC ─────────────────────────────────────────
+
+def figura_estacionalidad(perfil_estacional):
+    """Promedio de ventas por mes calendario; n = años observados de cada mes."""
+    valores = np.nan_to_num(perfil_estacional["promedio"].to_numpy() / 1e6, nan=0.0)
+    n_anios = perfil_estacional["n_anios"].to_numpy()
+
+    fig, ax = plt.subplots(figsize=(ANCHO, 4.6))
+    estilo_ejes(ax)
+    barras = ax.bar(MESES_ES, valores, color=COLOR_ESTACION, width=0.7)
+    ax.set_ylim(0, max(valores.max(), 1.0) * 1.15)
+    ax.yaxis.set_major_formatter(formateador_es(0))
+    ax.set_xlabel("Mes (n = años observados)")
+    ax.set_ylabel("Ventas promedio (millones de COP)")
+    for barra, n in zip(barras, n_anios):
+        ax.annotate(f"n={int(n)}", (barra.get_x() + barra.get_width() / 2, barra.get_height()),
+                    textcoords="offset points", xytext=(0, 3), ha="center",
+                    fontsize=FUENTE - 1, color=COLOR_INK)
+    plt.setp(ax.get_xticklabels(), fontsize=FUENTE - 1)
+    fig.tight_layout()
+    _guardar(fig, "eda_estacionalidad.png")
+
+
+def figura_pareto(tabla_abc, resumen_abc):
+    """Curva de Pareto: % acumulado de ventas según % de productos."""
     n_prod = len(tabla_abc)
     x_pct = np.arange(1, n_prod + 1) / n_prod * 100
     y_pct = tabla_abc["cum_share"].to_numpy() * 100
-
     n_a = resumen_abc["A"]["n_products"]
     n_b = resumen_abc["B"]["n_products"]
     corte_ab = n_a / n_prod * 100
     corte_bc = (n_a + n_b) / n_prod * 100
 
-    fig, ax = plt.subplots(figsize=(9, 6))
-    _estilo_ejes(ax, fig)
+    fig, ax = plt.subplots(figsize=(ANCHO, 5.2))
+    estilo_ejes(ax)
     ax.axvspan(0, corte_ab, color=COLOR_FILL_A, zorder=0)
-    ax.axvspan(corte_ab, corte_bc, color=COLOR_SURFACE, zorder=0)
     ax.axvspan(corte_bc, 100, color=COLOR_FILL_A, zorder=0)
-    ax.plot(x_pct, y_pct, color=COLOR_PARETO, linewidth=2, zorder=3)
-    ax.axvline(corte_ab, color=COLOR_MUTED, linestyle="--", linewidth=1, zorder=2)
-    ax.axvline(corte_bc, color=COLOR_MUTED, linestyle="--", linewidth=1, zorder=2)
+    ax.plot(x_pct, y_pct, color=COLOR_PARETO, linewidth=2.2, zorder=3)
+    for corte in (corte_ab, corte_bc):
+        ax.axvline(corte, color=COLOR_MUTED, linestyle="--", linewidth=1, zorder=2)
 
     ax.set_xlim(0, 100)
-    ax.set_ylim(0, 100)
-    ax.set_xlabel("% de productos (ordenados por ventas, de mayor a menor)")
+    ax.set_ylim(0, 110)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.set_xlabel("% de productos (de mayor a menor venta)")
     ax.set_ylabel("% acumulado de ventas")
-    ax.grid(axis="y", color=COLOR_GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-
-    # Letras de región centradas arriba (caben incluso en la región A, que es
-    # angosta) y el detalle numérico en un bloque dentro de la región C, que
-    # es amplia y está vacía; así ningún texto cruza las líneas de corte.
     for letra, x0, x1 in (("A", 0, corte_ab), ("B", corte_ab, corte_bc), ("C", corte_bc, 100)):
-        ax.text((x0 + x1) / 2, 103, letra, ha="center", va="bottom",
-                fontsize=10, fontweight="bold", color=COLOR_INK)
-    pct_prod = {k: resumen_abc[k]["n_products"] / n_prod * 100 for k in ("A", "B", "C")}
+        ax.text((x0 + x1) / 2, 102, letra, ha="center", va="bottom",
+                fontweight="bold", color=COLOR_INK)
     detalle = "\n".join(
-        f"{k}: {pct_prod[k]:.1f} % de productos → {resumen_abc[k]['pct_sales']:.1f} % de ventas"
+        f"{k}: {fmt_es(resumen_abc[k]['n_products'] / n_prod * 100, 1)} % de productos"
+        f" → {fmt_es(resumen_abc[k]['pct_sales'], 1)} % de ventas"
         for k in ("A", "B", "C")
     )
-    ax.text(corte_bc + 4, 40, detalle, ha="left", va="center", fontsize=8.5,
-            color=COLOR_INK, linespacing=1.6)
-    ax.set_ylim(0, 108)
-
+    ax.text(99, 30, detalle, ha="right", va="center", linespacing=1.6,
+            bbox=dict(boxstyle="round,pad=0.4", facecolor=COLOR_SURFACE, edgecolor=COLOR_GRID))
     fig.tight_layout()
-    salida_c = FIGURES / "eda_pareto_abc.png"
-    fig.savefig(salida_c, dpi=200, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    print(f"[✓] Figura exportada -> {salida_c}")
+    _guardar(fig, "eda_pareto_abc.png")
 
-    # ── Figura d: distribución de ventas producto-mes (log10, solo > 0) ────
-    positivos = model.df.loc[model.df[c("total_sold")] > 0, c("total_sold")].to_numpy()
+
+def figura_distribucion(positivos, proporcion_ceros):
+    """Histograma de ventas producto-mes > 0 en escala logarítmica."""
     bins = np.logspace(np.log10(positivos.min()), np.log10(positivos.max()), 40)
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    _estilo_ejes(ax, fig)
+    fig, ax = plt.subplots(figsize=(ANCHO, 4.6))
+    estilo_ejes(ax)
     ax.hist(positivos, bins=bins, color=COLOR_HIST)
     ax.set_xscale("log")
-    ax.set_xlabel("Ventas del mes por producto (COP, escala log)")
-    ax.set_ylabel("Número de observaciones producto-mes")
-    ax.grid(axis="y", color=COLOR_GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-
-    # Margen superior para que la nota no tape ninguna barra
-    ax.set_ylim(top=ax.get_ylim()[1] * 1.3)
-    ax.text(
-        0.02, 0.96,
-        f"{intermit['share_zero_overall']:.1%} de los meses producto-mes tienen "
-        "venta = 0 y no se muestran aquí\n(no representables en escala "
-        "logarítmica; ver sección 4 del reporte)",
-        transform=ax.transAxes, ha="left", va="top", fontsize=8, color=COLOR_INK,
-        bbox=dict(boxstyle="round,pad=0.35", facecolor=COLOR_FILL_A, edgecolor=COLOR_GRID),
-    )
-
+    ax.set_xticks([1e2, 1e4, 1e6])
+    ax.xaxis.set_major_formatter(formateador_es(0))
+    ax.yaxis.set_major_formatter(formateador_es(0))
+    ax.set_xlabel("Ventas del mes por producto (COP, escala logarítmica)")
+    ax.set_ylabel("Casos (producto-mes)")
+    ax.set_ylim(top=ax.get_ylim()[1] * 1.35)
+    ax.text(0.02, 0.96,
+            f"Sin los meses sin ventas\n({fmt_es(proporcion_ceros * 100, 1)} % de los casos)",
+            transform=ax.transAxes, ha="left", va="top", linespacing=1.4,
+            bbox=dict(boxstyle="round,pad=0.35", facecolor=COLOR_FILL_A, edgecolor=COLOR_GRID))
     fig.tight_layout()
-    salida_d = FIGURES / "eda_distribucion_ventas.png"
-    fig.savefig(salida_d, dpi=200, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    print(f"[✓] Figura exportada -> {salida_d}")
-
-    print(f"\n[✓] Tiempo total: {elapsed:.1f} s")
+    _guardar(fig, "eda_distribucion_ventas.png")
 
 
 if __name__ == "__main__":

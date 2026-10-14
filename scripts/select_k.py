@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast.paths import DEFAULT_DATASET, FIGURES, REPORTS, ensure_output_dirs  # noqa: E402
 
 from ventas_forecast.model import SalesForecastModel  # noqa: E402
+from ventas_forecast.figuras import ANCHO, aplicar_estilo, estilo_ejes, formateador_es  # noqa: E402
 
 
 def main():
@@ -43,38 +44,37 @@ def main():
     print(f"\n[✓] k con mayor silueta: {k_optimo}")
     print(f"[✓] Tabla exportada → {salida_csv}")
 
-    # ── Gráfico: codo + silueta ───────────────────────────────────────────────
-    fig, (ax_codo, ax_silueta) = plt.subplots(1, 2, figsize=(14, 5))
+    salida_fig = FIGURES / "seleccion_k_kmeans.png"
+    figura_seleccion_k(tabla, salida_fig)
+    print(f"[✓] Figura exportada → {salida_fig}")
+
+
+def figura_seleccion_k(tabla, salida):
+    """Codo (inercia) y silueta por k, en dos paneles apilados."""
+    aplicar_estilo()
     color = "#e34948"
+    fig, (ax_codo, ax_silueta) = plt.subplots(2, 1, figsize=(ANCHO, 7.2), sharex=True)
+    for ax in (ax_codo, ax_silueta):
+        estilo_ejes(ax, grid="both")
 
-    ax_codo.plot(tabla["k"], tabla["inercia"], marker="o", color=color)
-    ax_codo.set_title("Método del codo")
-    ax_codo.set_xlabel("Número de clústeres (k)")
+    ax_codo.plot(tabla["k"], tabla["inercia"], marker="o", color=color, linewidth=2)
     ax_codo.set_ylabel("Inercia")
-    ax_codo.grid(True, alpha=.3)
+    ax_codo.yaxis.set_major_formatter(formateador_es(0))
 
-    ax_silueta.plot(tabla["k"], tabla["silueta"], marker="o", color=color)
-    fila_optima = tabla.loc[tabla["silueta"].idxmax()]
-    ax_silueta.scatter(
-        [fila_optima["k"]], [fila_optima["silueta"]],
-        s=140, marker="*", color="#eda100", zorder=5,
-        label=f"k óptimo = {int(fila_optima['k'])}",
-    )
-    ax_silueta.annotate(
-        f"k={int(fila_optima['k'])}",
-        (fila_optima["k"], fila_optima["silueta"]),
-        textcoords="offset points", xytext=(8, 8),
-    )
-    ax_silueta.set_title("Coeficiente de silueta")
+    ax_silueta.plot(tabla["k"], tabla["silueta"], marker="o", color=color, linewidth=2)
+    fila = tabla.loc[tabla["silueta"].idxmax()]
+    ax_silueta.scatter([fila["k"]], [fila["silueta"]], s=220, marker="*", color="#eda100",
+                       zorder=5, label=f"k óptimo = {int(fila['k'])}")
     ax_silueta.set_xlabel("Número de clústeres (k)")
-    ax_silueta.set_ylabel("Silueta")
-    ax_silueta.legend()
-    ax_silueta.grid(True, alpha=.3)
+    ax_silueta.set_ylabel("Coeficiente de silueta")
+    ax_silueta.yaxis.set_major_formatter(formateador_es(2))
+    ax_silueta.set_xticks(list(tabla["k"]))
+    ax_silueta.set_ylim(top=float(tabla["silueta"].max()) + 0.012)
+    ax_silueta.legend(frameon=False, loc="upper right")
 
     fig.tight_layout()
-    salida_fig = FIGURES / "seleccion_k_kmeans.png"
-    fig.savefig(salida_fig, dpi=200)
-    print(f"[✓] Figura exportada → {salida_fig}")
+    fig.savefig(salida, dpi=200)
+    plt.close(fig)
 
 
 if __name__ == "__main__":

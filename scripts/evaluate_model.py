@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast.paths import DEFAULT_DATASET, FIGURES, REPORTS, ensure_output_dirs  # noqa: E402
 
 from ventas_forecast.model import SalesForecastModel  # noqa: E402
+from ventas_forecast.figuras import ANCHO, aplicar_estilo, estilo_ejes, fmt_es, formateador_es  # noqa: E402
 
 CLASS_NAMES = ["Reducir", "Mantener", "Reforzar"]
 
@@ -191,58 +192,68 @@ def main():
     salida_txt.write_text(resumen, encoding="utf-8")
     print(f"\n[✓] Reporte exportado -> {salida_txt}")
 
-    # ── Figura: matriz de confusión ───────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(matriz, cmap="Greens")
-    ax.set_title("Matriz de confusión — clasificador")
-    ax.set_xlabel("Clase predicha")
-    ax.set_ylabel("Clase real")
-    ax.set_xticks(range(len(CLASS_NAMES)))
-    ax.set_yticks(range(len(CLASS_NAMES)))
-    ax.set_xticklabels(CLASS_NAMES)
-    ax.set_yticklabels(CLASS_NAMES)
-
-    umbral = matriz.max() / 2 if matriz.max() > 0 else 0
-    for i in range(matriz.shape[0]):
-        for j in range(matriz.shape[1]):
-            color = "white" if matriz[i, j] > umbral else "black"
-            ax.text(j, i, str(matriz[i, j]), ha="center", va="center", color=color)
-
-    fig.colorbar(im, ax=ax)
-    fig.tight_layout()
+    # ── Figuras ───────────────────────────────────────────────────────────────
+    aplicar_estilo()
     salida_matriz = FIGURES / "matriz_confusion.png"
-    fig.savefig(salida_matriz, dpi=200)
-    plt.close(fig)
+    figura_matriz_confusion(matriz, salida_matriz)
     print(f"[✓] Figura exportada -> {salida_matriz}")
 
-    # ── Figura: real vs predicho (regresor, escala log-log) ──────────────────
     tabla = model.reg_test_results
-    real      = tabla["real"].to_numpy()
-    predicho  = tabla["predicho"].to_numpy()
-
-    fig2, ax2 = plt.subplots(figsize=(6, 6))
-    ax2.scatter(real, predicho, alpha=.6, color="#d55181", s=30)
-
-    minimo = max(min(real.min(), predicho.min()), 1e-6)
-    maximo = max(real.max(), predicho.max())
-    ax2.plot([minimo, maximo], [minimo, maximo],
-             linestyle="--", color="#52514e", label="y = x")
-
-    ax2.set_xscale("log")
-    ax2.set_yscale("log")
-    ax2.set_xlabel("Ventas reales (COP)")
-    ax2.set_ylabel("Ventas predichas (COP)")
-    ax2.set_title("Regresor — real vs. predicho (prueba, top productos)")
-    ax2.legend()
-    ax2.grid(True, alpha=.3, which="both")
-
-    fig2.tight_layout()
     salida_scatter = FIGURES / "real_vs_predicho.png"
-    fig2.savefig(salida_scatter, dpi=200)
-    plt.close(fig2)
+    figura_real_vs_predicho(tabla["real"].to_numpy(), tabla["predicho"].to_numpy(), salida_scatter)
     print(f"[✓] Figura exportada -> {salida_scatter}")
 
     print(f"[✓] Tiempo total: {elapsed:.1f} s")
+
+
+def figura_matriz_confusion(matriz, salida):
+    """Matriz de confusión del clasificador (conteos), escala verde."""
+    n = len(CLASS_NAMES)
+    fig, ax = plt.subplots(figsize=(ANCHO, 5.6))
+    im = ax.imshow(matriz, cmap="Greens")
+    ax.set_xlabel("Decisión predicha")
+    ax.set_ylabel("Decisión real")
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(CLASS_NAMES)
+    ax.set_yticklabels(CLASS_NAMES)
+    umbral = matriz.max() / 2 if matriz.max() > 0 else 0
+    for i in range(n):
+        for j in range(n):
+            color = "white" if matriz[i, j] > umbral else "black"
+            ax.text(j, i, fmt_es(matriz[i, j]), ha="center", va="center", color=color,
+                    fontweight="bold")
+    cb = fig.colorbar(im, ax=ax)
+    cb.ax.yaxis.set_major_formatter(formateador_es(0))
+    cb.set_label("Casos")
+    fig.tight_layout()
+    fig.savefig(salida, dpi=200)
+    plt.close(fig)
+
+
+def figura_real_vs_predicho(real, predicho, salida):
+    """Ventas reales vs predichas del regresor (escala logarítmica en ambos ejes)."""
+    fig, ax = plt.subplots(figsize=(ANCHO, 6.4))
+    estilo_ejes(ax, grid="both")
+    ax.scatter(real, predicho, alpha=.6, color="#d55181", s=30)
+    minimo = max(min(real[real > 0].min(), predicho[predicho > 0].min()), 1e-6) * 0.7
+    maximo = max(real.max(), predicho.max()) * 1.4
+    ax.plot([minimo, maximo], [minimo, maximo], linestyle="--", color="#52514e",
+            label="Predicción igual a lo real")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    for eje in (ax.xaxis, ax.yaxis):
+        eje.set_major_formatter(formateador_es(0))
+    ax.set_xlim(minimo, maximo)
+    ax.set_ylim(minimo, maximo)
+    ax.set_xticks([1e3, 1e5, 1e7])
+    ax.set_yticks([1e3, 1e5, 1e7])
+    ax.set_xlabel("Ventas reales (COP, escala logarítmica)")
+    ax.set_ylabel("Ventas predichas (COP, escala log.)")
+    ax.legend(frameon=False, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(salida, dpi=200)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
