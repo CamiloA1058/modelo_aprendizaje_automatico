@@ -154,6 +154,8 @@ Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen
 
 **Estimación por promedio.** Los productos que no vendieron en el último mes pero sí en alguno de los 2 meses anteriores (con al menos `min_months` meses con ventas y dentro de los 1.900 con más ventas) aparecen aparte: su monto es el promedio de los últimos 3 meses (`media_3`), no una predicción del modelo, y su decisión es "Sin recomendación (estimación por promedio)", porque el clasificador es peor que la clase mayoritaria en ellos. Se calculan en `SalesForecastModel.estimar_por_promedio()` (activo por defecto, `estimacion_por_promedio=False` lo desactiva) y el CSV trae la columna `origen_estimacion` ("modelo" / "promedio"). El KPI "Ventas predichas" suma ambos grupos y detalla cada uno; Reforzar/Mantener/Reducir y la dona cuentan solo los productos del modelo, y un KPI aparte muestra cuántos productos quedan sin recomendación. El catálogo tiene el filtro "Sin recomendación (estimación por promedio)". En abril de 2026 (V6): 697 productos con decisión, 348 por promedio, 247,0 M + 60,6 M = 307,6 M (entrada "[Sistema] Estimación por promedio..." de `docs/CHANGELOG.md`).
 
+**Probabilidad de venta.** Para todos los productos (los del modelo y los de estimación por promedio) el sistema calcula la probabilidad de que tengan ventas el mes predicho y la traduce a "Se venderá: Sí/No". `SalesForecastModel.agregar_probabilidad_venta()` (activo por defecto, `probabilidad_venta=False` lo desactiva) entrena un Random Forest binario solo con la partición de entrenamiento y elige el umbral con la validación interna; el CSV trae las columnas `prob_venta` (0 a 1) y `se_vendera`. El resumen muestra el KPI "Probablemente se venderán: N de M productos" (con el umbral y la exactitud de validación interna), las tablas del resumen y el catálogo tienen las columnas "Prob. de venta" y "Se venderá", el catálogo permite filtrar por "Se venderá / No se venderá" y ordenar por probabilidad de venta, y el detalle del producto la muestra también para los de promedio. En el estudio de caso (abril a septiembre de 2026) acierta si habrá venta en 70,8 % de los producto-mes agrupados (69,5 % a 72,0 % por mes); los montos no cambian (entrada "[Sistema] Probabilidad de venta en el dashboard" de `docs/CHANGELOG.md`).
+
 ```
 Navegador (dashboard/dashboard.html)
         │  HTTP / JSON
@@ -161,7 +163,7 @@ Navegador (dashboard/dashboard.html)
   dashboard/app.py (Flask, puerto 5000)
         ├── GET  /api/status        Estado del pipeline + mes predicho
         ├── POST /api/run           Lanza el modelo en un hilo secundario
-        ├── GET  /api/summary       KPIs, pred_total (modelo + promedio), pred_total_modelo, pred_total_promedio, n_promedio, pred_total_rf, blend_weight, historial, métricas, top productos
+        ├── GET  /api/summary       KPIs, pred_total (modelo + promedio), pred_total_modelo, pred_total_promedio, n_promedio, n_se_vendera, sale_threshold, pred_total_rf, blend_weight, historial, métricas, top productos
         ├── GET  /api/products      Lista paginada con filtros y orden
         ├── GET  /api/product/<id>  Historial + predicción de un producto
         └── GET  /api/download      Descarga PREDICCION_MENSUAL.csv
