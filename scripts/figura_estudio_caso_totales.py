@@ -24,7 +24,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast.figuras import (  # noqa: E402
-    ANCHO, FUENTE, MESES_ES, aplicar_estilo, estilo_ejes, fmt_es, formateador_es,
+    ANCHO, FUENTE, aplicar_estilo, estilo_ejes, fmt_es, formateador_es,
 )
 from ventas_forecast.paths import FIGURES, REPORTS  # noqa: E402
 
@@ -42,8 +42,10 @@ def cargar_resumen(xlsx=None):
 
 
 def etiquetas_mes(meses):
-    """'2026-04' -> 'Abr'; el mes con ventas reales incompletas lleva asterisco."""
-    return [MESES_ES[int(m[5:7]) - 1] + ("*" if m == MES_INCOMPLETO else "") for m in meses]
+    """Mes 1, Mes 2, ... (como el texto de la tesis, sin fechas); el mes con
+    ventas reales incompletas lleva asterisco."""
+    return [f"Mes {i}" + ("*" if m == MES_INCOMPLETO else "")
+            for i, m in enumerate(meses, start=1)]
 
 
 def figura(resumen, salida):

@@ -427,7 +427,7 @@ def build_figure(res_clf, res_reg_b, salida):
     # ── Panel inferior: MASE por modelo (menor es mejor), ordenado ─────────
     modelos_mase = sorted(res_reg_b.keys(), key=lambda m: res_reg_b[m]["mase"], reverse=True)
     valores_mase = [res_reg_b[m]["mase"] for m in modelos_mase]
-    etiquetas = [m.replace("Media_3", "Media de 3 meses") for m in modelos_mase]
+    etiquetas = [m.replace("Media_3", "Promedio de 3 meses") for m in modelos_mase]
     ax2.barh(etiquetas, valores_mase, color="#eb6834", zorder=2)
     for i, v in enumerate(valores_mase):
         ax2.annotate(fmt_es(v, 2), (v, i), textcoords="offset points", xytext=(-5, 0),

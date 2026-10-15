@@ -25,7 +25,9 @@ class EtiquetasEstudioCaso(unittest.TestCase):
     def test_septiembre_lleva_asterisco(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
         from figura_estudio_caso_totales import etiquetas_mes
-        self.assertEqual(etiquetas_mes(["2026-04", "2026-09"]), ["Abr", "Sep*"])
+        meses = ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]
+        self.assertEqual(etiquetas_mes(meses),
+                         ["Mes 1", "Mes 2", "Mes 3", "Mes 4", "Mes 5", "Mes 6*"])
 
 
 if __name__ == "__main__":

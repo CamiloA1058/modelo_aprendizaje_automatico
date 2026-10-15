@@ -1,3 +1,10 @@
+## [Figuras] Etiquetas de meses y de modelos alineadas con la tesis - 2026-10-14
+
+- `estudio_caso_totales.png`: el eje X dice "Mes 1" ... "Mes 6*" en lugar de Abr ... Sep* (el texto y la Tabla 11 numeran los meses sin fechas). Regenerada desde `prediccion_vs_real.xlsx`.
+- `comparacion_modelos.png`: la barra "Media de 3 meses" pasa a "Promedio de 3 meses". Regenerada desde `comparacion_modelos.csv`, sin reentrenar.
+
+---
+
 ## [Sistema] Pulido mínimo del dashboard para las figuras de la tesis - 2026-10-14
 
 Sin cambios de diseño. Las capturas `panel_*.png` se retomaron con una corrida por defecto.
