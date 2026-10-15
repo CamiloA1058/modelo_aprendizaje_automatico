@@ -28,6 +28,7 @@ DEFAULT_OUTPUT = DEFAULT_PREDICTION
 # ── Importar modelo ───────────────────────────────────────────────────────────
 from ventas_forecast.model import SalesForecastModel, ETIQUETA_SIN_RECOMENDACION
 from ventas_forecast import grupos as grupos_mod
+from ventas_forecast.figuras import fmt_es, pct_es
 
 app = Flask(__name__)
 CORS(app)
@@ -48,6 +49,22 @@ def _es_promedio(df):
     if "origen_estimacion" not in df.columns:
         return pd.Series(False, index=df.index)
     return df["origen_estimacion"] == "promedio"
+
+
+def _msg_registros(n_registros, n_productos):
+    return f"  → {fmt_es(n_registros)} registros | {fmt_es(n_productos)} productos únicos"
+
+
+def _msg_clasificador(m):
+    """Métricas principales (macro y balanceada), las mismas de la tesis."""
+    return (f"  → F1 macro {fmt_es(m['f1_macro'], 2)} | "
+            f"exactitud balanceada {pct_es(m['balanced_accuracy'])} | "
+            f"exactitud {pct_es(m['accuracy'])}")
+
+
+def _msg_umbral(umbral, exactitud):
+    return (f"  → Umbral {fmt_es(umbral, 2)} | exactitud de validación "
+            f"interna {pct_es(exactitud)}")
 
 
 def _log(msg):
@@ -88,7 +105,7 @@ def _run_model(filepath, col_map, params):
 
         _log("✔ Cargando y limpiando datos…")
         model.load_and_clean()
-        _log(f"  → {len(model.df):,} registros | {model.df[model._c('id')].nunique():,} productos únicos")
+        _log(_msg_registros(len(model.df), model.df[model._c('id')].nunique()))
         _log(f"  → Último mes en datos: {model._ultimo_mes.strftime('%Y-%m')}")
         _log(f"  → Mes a predecir: {model._mes_pred.strftime('%Y-%m')}")
 
@@ -101,12 +118,12 @@ def _run_model(filepath, col_map, params):
         _log("✔ Preparando conjuntos de entrenamiento y predicción…")
         model.prepare_split()
         n_pred = len(model.df_predict)
-        _log(f"  → {n_pred:,} productos elegibles para predecir {model._mes_pred.strftime('%Y-%m')}")
+        _log(f"  → {fmt_es(n_pred)} productos elegibles para predecir {model._mes_pred.strftime('%Y-%m')}")
 
         _log("✔ Entrenando clasificador de crecimiento…")
         model.train_classifier()
         m = model.metrics
-        _log(f"  → Accuracy {m['accuracy']:.1%} | Precision {m['precision']:.1%} | Recall {m['recall']:.1%} | F1 {m['f1']:.1%}")
+        _log(_msg_clasificador(m))
 
         _log("✔ Entrenando regresor de ventas…")
         model.train_regressor()
@@ -120,8 +137,7 @@ def _run_model(filepath, col_map, params):
         if model.probabilidad_venta:
             _log("✔ Calculando la probabilidad de venta de cada producto…")
             model.agregar_probabilidad_venta()
-            _log(f"  → Umbral {model.sale_threshold:.2f} | exactitud de validación "
-                 f"interna {model.sale_val_accuracy:.1%}")
+            _log(_msg_umbral(model.sale_threshold, model.sale_val_accuracy))
 
         if model.stock_sugerido:
             _log("✔ Calculando el stock sugerido de cada producto…")
@@ -135,7 +151,7 @@ def _run_model(filepath, col_map, params):
         _state["results"]      = model.results
         _state["mes_predicho"] = model._mes_pred.strftime("%Y-%m")
         _state["status"]       = "done"
-        _log(f"✅ Pipeline completado — {len(model.results):,} productos con predicción.")
+        _log(f"✅ Pipeline completado — {fmt_es(len(model.results))} productos con predicción.")
 
     except Exception as exc:
         _state["status"] = "error"

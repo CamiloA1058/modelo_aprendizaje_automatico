@@ -147,7 +147,8 @@ class PipelineDelDashboardTest(unittest.TestCase):
         from unittest import mock
         modelo = mock.MagicMock()
         modelo._c = lambda rol: rol
-        modelo.metrics = {"accuracy": .5, "precision": .5, "recall": .5, "f1": .5}
+        modelo.metrics = {"accuracy": .5, "precision": .5, "recall": .5, "f1": .5,
+                          "f1_macro": .4, "balanced_accuracy": .5}
         modelo.sale_threshold, modelo.sale_val_accuracy = 0.5, 0.7
         modelo._mes_pred = pd.Timestamp("2026-04-01")
         modelo._ultimo_mes = pd.Timestamp("2026-03-01")

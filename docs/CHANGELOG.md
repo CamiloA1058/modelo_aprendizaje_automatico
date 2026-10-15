@@ -1,3 +1,15 @@
+## [Sistema] Pulido mínimo del dashboard para las figuras de la tesis - 2026-10-14
+
+Sin cambios de diseño. Las capturas `panel_*.png` se retomaron con una corrida por defecto.
+
+- Tarjeta "Métricas de validación del modelo": F1 macro (0,45), Exactitud balanceada (50,4 %), Exactitud (66,8 %) y Acierto "¿se venderá?" (79,3 %, validación interna del modelo de probabilidad de venta). Coinciden con `evaluacion_modelo.txt`; antes mostraba las métricas ponderadas (exactitud 67 %, precisión 79 %, sensibilidad 67 %, F1 71 %) en inglés.
+- Formato es-CO en todo lo visible: coma decimal, punto de miles también con 4 cifras (1.045) y "%" separado (437,9 %). Registro de ejecución con `fmt_es`/`pct_es` (`figuras.py`); el HTML usa `nEs`/`pc` con `useGrouping: 'always'`.
+- Notas de Productos y Grupos: "en los seis meses de prueba" en lugar de las fechas explícitas.
+- Diagnóstico del stock sugerido de 987 ($59 · 1 uds): no es un error de precio ni de unidades. Su `prob_venta` es 0,28 (cubeta [0-0,4), q70 = -8,79): en esa cubeta más del 70 % de las filas de validación no vendió, así que el cuantil 70 % de los residuos log lleva la predicción de $396.006 a $59 (cobertura esperada 72 % = no venderá). El "1 uds" es el techo de $59 / $198.000. Sin cambios de código; la cobertura de 68,4 % no cambia.
+- Pruebas: `tests/test_dashboard_formato_es.py` (8); suite de 394 pruebas.
+
+---
+
 ## [Sistema] Stock sugerido por producto - 2026-10-14
 
 Resultado del experimento "[Experimento] Stock sugerido con nivel de servicio 70 %" (cobertura agrupada 68,4 %, 4 de 6 meses dentro de 65-75 %).

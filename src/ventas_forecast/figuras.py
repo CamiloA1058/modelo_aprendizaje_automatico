@@ -25,6 +25,11 @@ def fmt_es(valor, decimales=0):
     return texto.replace(",", "\0").replace(".", ",").replace("\0", ".")
 
 
+def pct_es(fraccion, decimales=1):
+    """Fracción como porcentaje es-CO: 0.793 -> '79,3 %'."""
+    return f"{fmt_es(fraccion * 100, decimales)} %"
+
+
 def formateador_es(decimales=0, sufijo=""):
     """FuncFormatter de matplotlib con coma decimal y punto de miles."""
     return FuncFormatter(lambda v, _pos: fmt_es(v, decimales) + sufijo)
