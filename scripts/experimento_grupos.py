@@ -108,6 +108,7 @@ def evaluar_origen(mes, ventas, mapa, estado, real_mes):
     d_x = _dir(p_uni, xgb_grupo)
     uni = pd.DataFrame(index=g_uni)
     uni["real"] = r.groupby("grupo")["real"].sum().reindex(g_uni)
+    uni["previo"] = p_uni["total"].iloc[-1].reindex(g_uni).fillna(0.0)
     uni["G0"] = r.groupby("grupo")["pred"].sum().reindex(g_uni)
     uni["G1"] = gr.media_3(p_uni).reindex(g_uni).fillna(0.0)
     uni["G2"] = d_uni["pred"].reindex(g_uni).fillna(0.0)
@@ -123,6 +124,7 @@ def evaluar_origen(mes, ventas, mapa, estado, real_mes):
     d_tx = _dir(p_todos, xgb_grupo)
     todos = pd.DataFrame(index=g_todos)
     todos["real"] = real_todos.reindex(g_todos).fillna(0.0)
+    todos["previo"] = p_todos["total"].iloc[-1].reindex(g_todos).fillna(0.0)
     todos["G0"] = uni["G0"].reindex(g_todos).fillna(0.0)
     todos["G1"] = gr.media_3(p_todos).reindex(g_todos).fillna(0.0)
     todos["G2"] = d_t["pred"].reindex(g_todos).fillna(0.0)
@@ -142,10 +144,16 @@ def metricas_filas(real, pred, top=20):
     return gr.resumen(real, pred, top=top)
 
 
-def _mascara_top(real, top=20):
-    m = np.zeros(len(real), bool)
-    m[np.argsort(-np.asarray(real, float), kind="stable")[:top]] = True
+def _mascara_top(criterio, top=20):
+    m = np.zeros(len(criterio), bool)
+    m[np.argsort(-np.asarray(criterio, float), kind="stable")[:top]] = True
     return m
+
+
+def seleccion_top(df, top=20):
+    """Los grupos con mas ventas del mes anterior (ultimo mes de entrenamiento):
+    informacion conocida antes del mes evaluado, nunca sus ventas reales."""
+    return _mascara_top(df["previo"].to_numpy(), top)
 
 
 def metricas_producto(real, pred):
@@ -190,10 +198,12 @@ def tabla_metricas(por_mes, variantes, objetivo):
         reales, preds, tops = [], [], []
         for mes, df in por_mes.items():
             m = gr.resumen(df["real"], df[v])
+            sel = seleccion_top(df)
+            m["top"] = gr.acierto_ponderado(df["real"].to_numpy()[sel], df[v].to_numpy()[sel])
             filas.append({"objetivo": objetivo, "variante": v, "mes": mes, **m})
             reales.append(df["real"].to_numpy())
             preds.append(df[v].to_numpy())
-            tops.append(_mascara_top(df["real"].to_numpy()))
+            tops.append(seleccion_top(df))
         R, P, T = np.concatenate(reales), np.concatenate(preds), np.concatenate(tops)
         pool = gr.resumen(R, P)
         pool["top"] = gr.acierto_ponderado(R[T], P[T])
@@ -255,7 +265,7 @@ def texto(df, uni, todos, prod, diags):
     for v in VARIANTES_UNI:
         lo, hi = ic_bootstrap(uni, v)
         L.append(f"  {ETIQ[v]:<38}{_p(lo)} a {_p(hi)}")
-    L += ["", "Acierto ponderado de los 20 grupos con mas ventas, por mes (universo):"]
+    L += ["", "Acierto ponderado de los 20 grupos con mas ventas del mes anterior, por mes (universo):"]
     cab = f"{'Variante':<38}" + "".join(f"{m[5:]:>8}" for m in ec.MESES)
     L.append(cab)
     for v in VARIANTES_UNI:
