@@ -50,7 +50,7 @@ En la validación interna el regresor temporal predice solo el 23,6 % de la suma
 
 **¿Se venderá? (estudio de caso, 6.145 producto-mes):** 70,8 % → 70,1 % (4.348 → 4.305 aciertos); por mes 69,6 / 70,6 / 69,5 / 72,0 / 71,7 / 71,1 → 69,6 / 69,7 / 69,9 / 70,6 / 71,6 / 69,0 %. El experimento (RF balanceado) reproduce las mismas cifras.
 
-**Grupos:** acierto ponderado agrupado 67,6 % → 68,9 % (por mes 72,1 / 64,5 / 46,6 / 74,0 / 70,6 / 72,8 → 76,4 / 68,5 / 40,3 / 74,0 / 73,1 / 73,7 %); 20 grupos con más ventas 73,4 % → 75,6 %.
+**Grupos:** acierto ponderado agrupado 67,6 % → 68,9 % (por mes 72,1 / 64,5 / 46,6 / 74,0 / 70,6 / 72,8 → 76,4 / 68,5 / 40,3 / 74,0 / 73,1 / 73,7 %); 20 grupos con más ventas del mes anterior (criterio conocido antes del mes evaluado; antes se elegían por las ventas reales del mes evaluado: 73,4 % → 75,6 %) 74,1 % (por mes 81,0 / 71,3 / 44,2 / 81,1 / 80,2 / 79,4 %).
 
 **Stock sugerido:** cobertura agrupada 68,4 % → 71,8 % (por mes 63,1 / 65,4 / 74,9 / 69,1 / 64,3 / 73,1 → 74,6 / 71,1 / 76,7 / 70,3 / 65,4 / 72,8 %; 5 de 6 meses en 65-75 %); unidades 71,2 % → 74,4 %; entre los que vendieron 47,3 % → 53,0 %; stock total / real 1,28 → 1,45 (más sobrestock).
 
@@ -63,7 +63,7 @@ Se regeneraron `tuning_rf_*`, `evaluacion_modelo.txt`, `matriz_confusion.png`, `
 ### Limitaciones que este cambio no corrige
 
 - La mezcla, el criterio de sesgo, el clasificador de venta (RF balanceado frente a otros), el nivel de stock y la vista por grupos se adoptaron después de mirar los seis meses del holdout en los experimentos. Los parámetros ya no se eligen con datos de reporte, pero esas decisiones de diseño sí miraron el holdout, así que el estudio de caso de esos componentes no es una prueba ciega. Una evaluación ciega requiere meses posteriores a septiembre de 2026. En la prueba interna (sin holdout) los cuatro clasificadores de venta quedan en 78,3 % a 79,8 %, sin un ganador claro.
-- El clasificador binario y el regresor usan la misma regla (último 20 % por producto) sobre conjuntos de filas distintos, así que el corte puede caer en meses distintos para un mismo producto. Cada selección usa solo el entrenamiento de su propio modelo.
+- El clasificador binario y el regresor usan la misma regla (último 20 % por producto) sobre conjuntos de filas distintos, así que el corte puede caer en meses distintos para un mismo producto. Cada selección usa solo datos de entrenamiento.
 - En `tune_classifier` la variable `cluster` sale del KMeans ajustado con toda la partición de entrenamiento y no se reajusta por pliegue (no toca la prueba interna).
 - Septiembre del holdout llega al 22 (incompleto).
 

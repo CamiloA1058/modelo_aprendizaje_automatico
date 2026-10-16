@@ -106,9 +106,9 @@ class GruposApiTest(unittest.TestCase):
         self.assertIn("page-grupos", html)
         self.assertIn("/api/grupos", html)
         # Cifras del estudio de caso con el w elegido en la validación interna
-        # (experimento_grupos.txt: G0 agrupado 68,9 %; 20 grupos 75,6 %).
+        # (experimento_grupos.txt: G0 agrupado 68,9 %; 20 grupos del mes anterior 74,1 %).
         self.assertIn("acertó en promedio el 69 % del valor vendido", html)
-        self.assertIn("en los 20 grupos que más venden, cerca del 76 %", html)
+        self.assertIn("en los 20 grupos que más vendieron el mes anterior, cerca del 74 %", html)
 
 
 if __name__ == "__main__":
