@@ -112,6 +112,11 @@ class StockApiTest(unittest.TestCase):
         self.assertIn("Stock sugerido (70 %)", html)
         self.assertIn("se cubrió la demanda de 7 de cada 10 productos", html)
 
+    def test_nota_con_la_cobertura_medida(self):
+        # experimento_stock_sugerido.txt: cobertura agrupada 71,8 %
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn("7 de cada 10 productos (72 % medido)", html)
+
     def test_sin_columnas_todo_sigue_igual(self):
         sin = _resultados(self.c, con_stock=False)
         m = dashboard_app._state["model"]
