@@ -94,14 +94,15 @@ class StockSugeridoTest(unittest.TestCase):
         self.assertGreater(cal["n_total"], 0)
 
     def test_calibracion_solo_con_validacion_interna(self):
-        """Sin holdout: toda fila de calibracion es de la particion de prueba
-        interna y su objetivo (mes siguiente) es anterior al mes predicho."""
+        """Sin holdout ni prueba interna: toda fila de calibracion es de la
+        validacion interna (dentro del entrenamiento) del regresor o del
+        clasificador de venta, y su objetivo es anterior al mes predicho."""
         v = self.m.stock_validacion
         self.assertGreater(len(v), 0)
         self.assertTrue((v["fecha"] < self.m._ultimo_mes).all())
-        test = self.m._df_train.loc[self.m._test_idx]
+        reg = self.m.blend_validacion
         sale = self.m._sale_val
-        llaves = (set(zip(test[self.c("id")], test["fecha"]))
+        llaves = (set(zip(reg["id"], reg["fecha"]))
                   | set(zip(sale["id"], sale["fecha"])))
         self.assertTrue(set(zip(v["id"], v["fecha"])) <= llaves)
 

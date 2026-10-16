@@ -77,6 +77,7 @@ class ProbabilidadVentaTest(unittest.TestCase):
     def test_guarda_exactitud_de_validacion_interna(self):
         a = self.m.sale_val_accuracy
         self.assertTrue(0.0 <= a <= 1.0)
+        self.assertTrue(0.0 <= self.m.sale_test_accuracy <= 1.0)
 
     def test_entrenado_solo_con_la_particion_de_entrenamiento(self):
         c = self.c
@@ -85,7 +86,10 @@ class ProbabilidadVentaTest(unittest.TestCase):
         frame, tr, te = sp.sale_train_frame(
             d, c("id"), c("total_sold"), self.m.train_ratio)
         self.assertEqual(self.m._sale_n_train, len(tr))
-        self.assertEqual(self.m._sale_n_val, len(te))
+        self.assertEqual(self.m._sale_n_test, len(te))
+        # la validacion interna (umbral) es parte del entrenamiento
+        self.assertGreater(self.m._sale_n_val, 0)
+        self.assertLess(self.m._sale_n_val, len(tr))
         # el mes a predecir no tiene target: nunca entra al entrenamiento
         self.assertTrue(frame["target"].notna().all())
         self.assertNotIn(self.m._ultimo_mes, set(frame.loc[tr, "fecha"]))

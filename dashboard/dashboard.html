@@ -284,7 +284,7 @@
           </div>
         </div>
         <div class="card">
-          <div class="section-title">Métricas de validación del modelo</div>
+          <div class="section-title">Métricas del modelo (prueba interna)</div>
           <div id="metricas-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"></div>
         </div>
       </div>
@@ -703,7 +703,7 @@ async function loadSummary() {
     document.getElementById('kpi-venta').textContent = `${fmt(d.n_se_vendera)} de ${fmt(d.n_con_prob_venta)}`;
     document.getElementById('kpi-venta-sub').textContent =
       `productos · umbral ${nEs(d.sale_threshold || 0, 2)}` +
-      (d.sale_val_accuracy != null ? ` · acierto en validación ${pc(d.sale_val_accuracy * 100, 1)}` : '');
+      (d.sale_test_accuracy != null ? ` · acierto en la prueba interna ${pc(d.sale_test_accuracy * 100, 1)}` : '');
   } else {
     document.getElementById('kpi-venta').textContent = '—';
     document.getElementById('kpi-venta-sub').textContent = 'Sin probabilidad de venta en estos resultados';
@@ -815,7 +815,7 @@ function renderMetricas(m, d) {
     { label: 'F1 macro',             txt: nEs(m.f1_macro, 2),                  color: 'blue' },
     { label: 'Exactitud balanceada', txt: pc(m.balanced_accuracy * 100, 1),    color: 'green' },
     { label: 'Exactitud',            txt: pc(m.accuracy * 100, 1),             color: 'green' },
-    { label: 'Acierto ¿se venderá?', txt: d && d.sale_val_accuracy != null ? pc(d.sale_val_accuracy * 100, 1) : '—', color: 'amber' },
+    { label: 'Acierto ¿se venderá?', txt: d && d.sale_test_accuracy != null ? pc(d.sale_test_accuracy * 100, 1) : '—', color: 'amber' },
   ];
   document.getElementById('metricas-grid').innerHTML = items.map(i => `
     <div class="kpi ${i.color}" style="padding:12px 14px;">

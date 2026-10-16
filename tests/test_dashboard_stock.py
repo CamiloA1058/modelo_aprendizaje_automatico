@@ -150,6 +150,7 @@ class PipelineDelDashboardTest(unittest.TestCase):
         modelo.metrics = {"accuracy": .5, "precision": .5, "recall": .5, "f1": .5,
                           "f1_macro": .4, "balanced_accuracy": .5}
         modelo.sale_threshold, modelo.sale_val_accuracy = 0.5, 0.7
+        modelo.sale_test_accuracy = 0.68
         modelo._mes_pred = pd.Timestamp("2026-04-01")
         modelo._ultimo_mes = pd.Timestamp("2026-03-01")
         modelo.probabilidad_venta = True

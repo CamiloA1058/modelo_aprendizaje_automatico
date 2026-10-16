@@ -37,8 +37,10 @@ class MensajesDeEjecucion(unittest.TestCase):
         self.assertNotIn(".", msg.replace("...", ""))
 
     def test_umbral_y_exactitud_interna(self):
-        self.assertEqual(dashboard_app._msg_umbral(0.63, 0.793),
-                         "  → Umbral 0,63 | exactitud de validación interna 79,3 %")
+        self.assertEqual(
+            dashboard_app._msg_umbral(0.63, 0.712),
+            "  → Umbral 0,63 (elegido con la validación interna) | "
+            "exactitud en la prueba interna 71,2 %")
 
 
 class HtmlEs(unittest.TestCase):
@@ -47,6 +49,13 @@ class HtmlEs(unittest.TestCase):
             self.assertIn(f"label: '{etiqueta}'", HTML)
         for ingles in ("Accuracy", "Precision", "Recall", "F1-Score"):
             self.assertNotIn(ingles, HTML)
+
+    def test_acierto_se_vendera_es_el_de_la_prueba_interna(self):
+        # La tarjeta y el KPI muestran la exactitud en la prueba interna (el
+        # umbral se elige con la validacion interna), nunca la de seleccion.
+        self.assertIn("d.sale_test_accuracy", HTML)
+        self.assertNotIn("d.sale_val_accuracy", HTML)
+        self.assertIn("Métricas del modelo (prueba interna)", HTML)
 
     def test_sin_formato_anglosajon(self):
         self.assertNotIn("en-US", HTML)

@@ -46,6 +46,7 @@ from ventas_forecast import grupos
 from ventas_forecast import improvements as im
 from ventas_forecast import sale_probability as sp
 from ventas_forecast import stock_sugerido as ss
+from ventas_forecast import validacion_interna as vi
 from ventas_forecast.data.cleaning import remove_bulk_adjustments
 from ventas_forecast.paths import DATA_RAW, DEFAULT_PREDICTION
 
@@ -79,12 +80,28 @@ DEFAULT_CLF_PARAMS = {
     "min_samples_leaf": 3,
 }
 
+# Hiperparámetros fijos del regresor (RandomForestRegressor sobre log1p) y del
+# clasificador binario de venta; los usan los modelos de producción y los
+# modelos temporales de la validación interna.
+REG_PARAMS = {"n_estimators": 200, "max_depth": 12}
+SALE_CLF_PARAMS = {"n_estimators": 300, "max_depth": 12, "min_samples_leaf": 5,
+                   "class_weight": "balanced"}
+
 # Grilla por defecto para tune_classifier() (GridSearchCV)
 DEFAULT_PARAM_GRID = {
     "rf__n_estimators": [200, 300],
     "rf__max_depth": [6, 10, 14, None],
     "rf__min_samples_leaf": [1, 3, 5],
 }
+
+
+def _prob_vende(clf, Z):
+    """Probabilidad de la clase 1 (vende); con una sola clase en el
+    entrenamiento, probabilidad constante igual a esa clase."""
+    p = clf.predict_proba(Z)
+    if p.shape[1] == 2:
+        return p[:, 1]
+    return np.full(len(Z), float(clf.classes_[0]))
 
 
 class SalesForecastModel:
@@ -237,7 +254,9 @@ class SalesForecastModel:
         # Poblados por agregar_probabilidad_venta()
         self.sale_clf = None
         self.sale_threshold = None
-        self.sale_val_accuracy = None
+        self.sale_val_accuracy = None   # exactitud en la validación interna (selección)
+        self.sale_test_accuracy = None  # exactitud en la prueba interna (reporte)
+        self._sale_features = None
         self._sale_n_train = None
         self._sale_n_val = None
 
@@ -258,6 +277,9 @@ class SalesForecastModel:
         self.reg_test_media_3 = None  # media_3 de las filas de prueba (train_regressor)
         self.blend_weight  = None     # w de la mezcla w*RF + (1-w)*media_3 (train_regressor)
         self.blend_metrics = {}       # métricas de la mezcla sobre prueba (train_regressor)
+        self.blend_validacion = None  # validación interna con la que se elige w (train_regressor)
+        self._top_interno = None      # top productos del entrenamiento interno
+        self._interna     = None      # partición interna del entrenamiento (_particion_interna)
         self.tuning_results  = None   # tabla completa de GridSearchCV (tune_classifier)
         self.best_clf_params = None   # mejores hiperparámetros encontrados
         self._features    = None
@@ -638,6 +660,8 @@ class SalesForecastModel:
         self._X_scaled   = X_scaled
         self._train_idx  = train_idx
         self._test_idx   = test_idx
+        self._interna    = None
+        self._top_interno = None
 
         # ── Dataset de predicción real ────────────────────────────────────────
         # Productos que tienen dato en el último mes con suficiente historial.
@@ -691,6 +715,104 @@ class SalesForecastModel:
             return {}
         return {"sample_weight": np.asarray(
             self.sample_weight_fn(rows["fecha"].to_numpy()), float)}
+
+    # ── 4b. VALIDACIÓN INTERNA (dentro de la partición de entrenamiento) ─────
+    def _particion_interna(self):
+        """
+        Divide la partición de ENTRENAMIENTO (self._train_idx) en
+        entrenamiento interno y validación interna con la misma regla
+        temporal por producto de _build_train_frame (primeras train_ratio
+        filas por fecha -> entrenamiento interno; el resto -> validación
+        interna). Ajusta un escalador y un KMeans de clustering SOLO con el
+        entrenamiento interno, para que la variable cluster de la validación
+        interna no dependa de sus propios meses.
+
+        Toda selección (peso de la mezcla, umbral de venta, cuantiles del
+        stock) se hace con esta validación interna; la partición de prueba
+        interna (self._test_idx) solo se usa para reportar.
+
+        Devuelve (y guarda en caché hasta el próximo prepare_split) un dict
+        con "tr" y "va" (etiquetas de self._df_train) y "cluster"
+        ((escalador, kmeans) o None si hay menos filas que clusters).
+        """
+        if self._interna is not None:
+            return self._interna
+        c = self._c
+        filas = self._df_train.loc[self._train_idx].sort_values([c("id"), "fecha"])
+        if self.elegibilidad_ampliada:
+            es_base = (filas[c("total_sold")] > 0).to_numpy()
+            mask = np.zeros(len(filas), bool)
+            pos = np.arange(len(filas))
+            for _, g in filas.assign(_pos=pos).groupby(c("id"), sort=False):
+                p = g["_pos"].to_numpy()
+                mask[p] = el.temporal_train_mask(es_base[p], self.train_ratio)
+        else:
+            mask = vi.particion_temporal(filas[c("id")], filas["fecha"], self.train_ratio)
+        tr = filas.index[mask].tolist()
+        va = filas.index[~mask].tolist()
+        cluster = None
+        if len(tr) >= self.n_clusters:
+            Xc = self._cluster_features(self._df_train.loc[tr])
+            esc = RobustScaler().fit(Xc)
+            km = KMeans(n_clusters=self.n_clusters, random_state=42, n_init=10)
+            km.fit(esc.transform(Xc))
+            cluster = (esc, km)
+        self._interna = {"tr": tr, "va": va, "cluster": cluster}
+        return self._interna
+
+    def _cluster_interno(self, frame):
+        """Cluster de las filas de frame según el KMeans del entrenamiento
+        interno (o la columna cluster de producción si no hay KMeans
+        interno)."""
+        modelo = self._particion_interna()["cluster"]
+        if modelo is None:
+            return frame["cluster"].to_numpy()
+        esc, km = modelo
+        return km.predict(esc.transform(self._cluster_features(frame)))
+
+    def _validacion_interna_regresor(self):
+        """
+        Repite el procedimiento del regresor con el entrenamiento interno:
+        top productos, escalador, variable cluster y RandomForestRegressor
+        (log1p, mismos hiperparámetros REG_PARAMS) ajustados SOLO con el
+        entrenamiento interno, y predice la validación interna de esos top
+        productos. Ningún objetivo de la validación interna, de la prueba
+        interna ni del mes a predecir entra al ajuste.
+
+        Devuelve un DataFrame id, fecha, real, rf, media_3 (media_3 con
+        respaldo a las ventas del mes actual) y n_train, o None si la
+        partición interna no alcanza (sin filas de entrenamiento o de
+        validación interna).
+        """
+        c = self._c
+        p = self._particion_interna()
+        if not p["tr"] or not p["va"] or p["cluster"] is None:
+            return None
+        d = self._df_train
+        filas = p["tr"] + p["va"]
+        X = self._X.loc[filas].copy()
+        X["cluster"] = self._cluster_interno(d.loc[filas])
+        top = (d.loc[p["tr"]].groupby(c("id"))[c("total_sold")]
+               .sum().nlargest(self.top_n_products).index)
+        self._top_interno = top
+        tr = d.loc[p["tr"]]
+        tr = tr[tr[c("id")].isin(top)]
+        va = d.loc[p["va"]]
+        va = va[va[c("id")].isin(top)]
+        if len(tr) == 0 or len(va) == 0:
+            return None
+        esc = RobustScaler().fit(X.loc[p["tr"]])
+        reg = RandomForestRegressor(**REG_PARAMS, random_state=42, n_jobs=-1)
+        reg.fit(esc.transform(X.loc[tr.index]), np.log1p(tr["target"]),
+                **self._fit_kwargs(tr))
+        rf = np.expm1(reg.predict(esc.transform(X.loc[va.index])))
+        m3 = va["media_3_actual"].to_numpy(float)
+        m3 = np.where(np.isnan(m3), va[c("total_sold")].to_numpy(float), m3)
+        return pd.DataFrame({
+            "id": va[c("id")].to_numpy(), "fecha": va["fecha"].to_numpy(),
+            "real": va["target"].to_numpy(float), "rf": rf, "media_3": m3,
+            "n_train": len(tr),
+        })
 
     # ── 5. CLASIFICADOR ───────────────────────────────────────────────────────
     def train_classifier(self):
@@ -913,9 +1035,7 @@ class SalesForecastModel:
         X_reg_train = self._X.loc[df_reg_train.index]
         y_reg_train = np.log1p(df_reg_train["target"])
 
-        self.reg = RandomForestRegressor(
-            n_estimators=200, max_depth=12, random_state=42, n_jobs=-1,
-        )
+        self.reg = RandomForestRegressor(**REG_PARAMS, random_state=42, n_jobs=-1)
         self.reg.fit(self.scaler.transform(X_reg_train), y_reg_train,
                      **self._fit_kwargs(df_reg_train))
 
@@ -958,12 +1078,23 @@ class SalesForecastModel:
 
         # ── Mezcla w*RF + (1-w)*media_3 ──────────────────────────────────────
         # El RF entrenado en log1p subestima el total en pesos (ratio de la
-        # suma predicha / real < 1). w se elige SOLO con la partición de
-        # prueba interna de este entrenamiento (sin datos del mes objetivo ni
-        # de ningún holdout), minimizando |suma(pred) - suma(real)|.
+        # suma predicha / real < 1). w se elige SOLO con la validación
+        # interna DENTRO de la partición de entrenamiento (un regresor
+        # temporal ajustado con el entrenamiento interno predice los últimos
+        # meses de entrenamiento de cada producto), minimizando
+        # |suma(pred) - suma(real)|. La partición de prueba interna solo
+        # reporta el resultado con ese w; tampoco se usa el mes objetivo ni
+        # ningún holdout. Sin validación interna posible, w = 1 (RF puro).
         self.reg_test_media_3 = pred_media_3
-        self.blend_weight = im.choose_blend_weight(
-            y_true, y_pred, pred_media_3, criterion="sesgo")
+        self.blend_validacion = self._validacion_interna_regresor()
+        v = self.blend_validacion
+        if v is not None and len(v):
+            self.blend_weight = im.choose_blend_weight(
+                v["real"].to_numpy(float), v["rf"].to_numpy(float),
+                v["media_3"].to_numpy(float), criterion="sesgo")
+        else:
+            self.blend_weight = 1.0
+            print("[!] Sin validación interna para la mezcla: w = 1 (RF puro)")
         pred_blend = im.blend(self.blend_weight, y_pred, pred_media_3)
         total_real = float(np.sum(y_true))
 
@@ -990,6 +1121,9 @@ class SalesForecastModel:
                 f"{self.baseline_metrics['media_3'][k]:<14}"
             )
         print(f"n_test: {self.reg_metrics['n_test']:,}")
+        if v is not None and len(v):
+            print(f"Validación interna de la mezcla: {len(v):,} filas "
+                  f"(regresor interno con {int(v['n_train'].iloc[0]):,} filas)")
         print(f"Mezcla w*RF + (1-w)*media_3: w={self.blend_weight}, "
               f"MAE={self.blend_metrics['mae']}, "
               f"razón de sumas={self.blend_metrics['sum_ratio']} "
@@ -1123,13 +1257,19 @@ class SalesForecastModel:
     def agregar_probabilidad_venta(self):
         """
         Entrena un RandomForest binario (vende = ventas del mes siguiente > 0,
-        class_weight balanced, misma configuracion del experimento "[Experimento]
+        SALE_CLF_PARAMS, misma configuracion del experimento "[Experimento]
         Probabilidad de venta") con las variables de SalesForecastModel mas las
         de ventas_forecast.sale_probability, SOLO con la particion temporal de
-        entrenamiento. El umbral maximiza la exactitud en la validacion interna
-        (nunca en el mes a predecir). Escribe en self.results prob_venta (0-1) y
-        se_vendera ("Sí"/"No") para todos los productos (modelo y promedio) y
-        vuelve a exportar el CSV. Guarda sale_threshold y sale_val_accuracy.
+        entrenamiento. El umbral se elige con la validacion interna DENTRO de
+        ese entrenamiento: un clasificador temporal con los mismos
+        hiperparametros (y la variable cluster del KMeans interno) se ajusta
+        con el entrenamiento interno y el umbral maximiza su exactitud en la
+        validacion interna. La particion de prueba interna solo reporta la
+        exactitud con ese umbral (sale_test_accuracy); nunca se usa el mes a
+        predecir. Escribe en self.results prob_venta (0-1) y se_vendera
+        ("Sí"/"No") para todos los productos (modelo y promedio) y vuelve a
+        exportar el CSV. Guarda sale_threshold, sale_val_accuracy (exactitud
+        en la validacion interna, la de la seleccion) y sale_test_accuracy.
         No toca el clasificador de 3 clases, el regresor ni la mezcla. Con
         probabilidad_venta=False no hace nada.
         """
@@ -1145,29 +1285,39 @@ class SalesForecastModel:
             *[f"lag_{l}" for l in self.lags], "mean_3", "mean_6",
             "mes_sig_sin", "mes_sig_cos", "cluster", *sp.NEW_FEATURES,
         ]
+        self._sale_features = feats
         X = frame[feats].fillna(0)
         y = frame["vende"].to_numpy()
-        clf = RandomForestClassifier(
-            n_estimators=300, max_depth=12, min_samples_leaf=5,
-            class_weight="balanced", random_state=42, n_jobs=-1)
-        clf.fit(X.iloc[tr].to_numpy(), y[tr])
+        tr, te = list(tr), list(te)
 
-        def _proba(Z):
-            p = clf.predict_proba(Z)
-            if p.shape[1] == 2:
-                return p[:, 1]
-            # una sola clase en el entrenamiento: probabilidad constante
-            return np.full(len(Z), float(clf.classes_[0]))
-
-        p_val = _proba(X.iloc[te].to_numpy()) if len(te) else np.array([])
-        if len(te):
-            umbral = sp.choose_threshold(y[te], p_val)
-            acc_val = float(((p_val >= umbral).astype(int) == y[te]).mean())
+        # ── Umbral: validacion interna dentro del entrenamiento ─────────────
+        sub = frame.iloc[tr]
+        en_tr = vi.particion_temporal(sub[c("id")], sub["fecha"], self.train_ratio)
+        tr_in = [i for i, m in zip(tr, en_tr) if m]
+        va_in = [i for i, m in zip(tr, en_tr) if not m]
+        if tr_in and va_in:
+            X_in = X.copy()
+            X_in["cluster"] = self._cluster_interno(frame)
+            clf_in = RandomForestClassifier(**SALE_CLF_PARAMS, random_state=42, n_jobs=-1)
+            clf_in.fit(X_in.iloc[tr_in].to_numpy(), y[tr_in])
+            p_val = _prob_vende(clf_in, X_in.iloc[va_in].to_numpy())
+            umbral = sp.choose_threshold(y[va_in], p_val)
+            acc_val = float(((p_val >= umbral).astype(int) == y[va_in]).mean())
         else:
+            p_val = np.array([])
             umbral, acc_val = 0.5, float("nan")
 
+        # ── Modelo de produccion (todo el entrenamiento) y reporte en prueba ─
+        clf = RandomForestClassifier(**SALE_CLF_PARAMS, random_state=42, n_jobs=-1)
+        clf.fit(X.iloc[tr].to_numpy(), y[tr])
+        if te:
+            p_te = _prob_vende(clf, X.iloc[te].to_numpy())
+            acc_test = float(((p_te >= umbral).astype(int) == y[te]).mean())
+        else:
+            acc_test = float("nan")
+
         ultimo = d[d["fecha"] == self._ultimo_mes].drop_duplicates(c("id"))
-        p_ult = pd.Series(_proba(ultimo[feats].fillna(0).to_numpy()),
+        p_ult = pd.Series(_prob_vende(clf, ultimo[feats].fillna(0).to_numpy()),
                           index=ultimo[c("id")].to_numpy())
         res = self.results.copy()
         prob = res[c("id")].map(p_ult).astype(float)
@@ -1178,11 +1328,14 @@ class SalesForecastModel:
         self.sale_clf = clf
         self.sale_threshold = float(umbral)
         self.sale_val_accuracy = acc_val
+        self.sale_test_accuracy = acc_test
         self._sale_n_train = len(tr)
-        self._sale_n_val = len(te)
-        # Validacion interna con probabilidad fuera de muestra (la usa
-        # agregar_stock_sugerido para calibrar por cubeta de prob_venta).
-        fv = frame.iloc[te]
+        self._sale_n_val = len(va_in)
+        self._sale_n_test = len(te)
+        # Validacion interna con probabilidad fuera de muestra del
+        # clasificador temporal (la usa agregar_stock_sugerido para calibrar
+        # por cubeta de prob_venta). Nunca filas de la prueba interna.
+        fv = frame.iloc[va_in]
         self._sale_val = pd.DataFrame({
             "id": fv[c("id")].to_numpy(),
             "fecha": fv["fecha"].to_numpy(),
@@ -1197,36 +1350,36 @@ class SalesForecastModel:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.results.to_csv(self.output_path, index=False)
         n_si = int((res["se_vendera"] == "Sí").sum())
-        print(f"[✓] Probabilidad de venta: umbral {umbral:.2f}, exactitud de "
-              f"validación interna {acc_val:.1%}; {n_si:,} de {len(res):,} "
-              f"productos se venderán")
+        print(f"[✓] Probabilidad de venta: umbral {umbral:.2f} (validación "
+              f"interna, exactitud {acc_val:.1%}); exactitud en la prueba "
+              f"interna {acc_test:.1%}; {n_si:,} de {len(res):,} productos se "
+              f"venderán")
 
     # ── 7e. STOCK SUGERIDO (nivel de servicio por producto) ──────────────────
     def _validacion_stock(self):
-        """Residuos de la validacion interna (nunca el mes a predecir ni un
-        holdout). Productos del modelo: filas de prueba del regresor (top
-        productos, objetivo conocido) con la prediccion de produccion
-        w*RF + (1-w)*media_3. Productos por promedio: filas de la validacion
-        del clasificador de venta con el mes actual en cero, media_3 > 0,
-        >= min_months meses con ventas y top producto, con prediccion
-        media_3. La probabilidad de venta es la fuera de muestra de esa
-        misma validacion (NaN si la fila no esta en ella o no hay modelo de
-        venta). Devuelve un DataFrame id, fecha, origen, prob, pred, real,
-        resid."""
+        """Residuos de la validacion interna DENTRO del entrenamiento (nunca la
+        prueba interna, el mes a predecir ni un holdout). Productos del
+        modelo: validacion interna del regresor (blend_validacion: regresor
+        temporal ajustado con el entrenamiento interno) con la prediccion
+        w*RF + (1-w)*media_3 y el w elegido en esa misma validacion.
+        Productos por promedio: filas de la validacion interna del
+        clasificador de venta con el mes actual en cero, media_3 > 0,
+        >= min_months meses con ventas y top producto del entrenamiento
+        interno, con prediccion media_3. La probabilidad de venta es la
+        fuera de muestra del clasificador temporal en esa validacion (NaN si
+        la fila no esta en ella o no hay modelo de venta). Devuelve un
+        DataFrame id, fecha, origen, prob, pred, real, resid."""
         c = self._c
         cols = ["id", "fecha", "origen", "prob", "pred", "real"]
         partes = []
-        test = self._df_train.loc[self._test_idx]
-        test = test[test[c("id")].isin(self._top_prods) & test["target"].notna()]
-        if len(test):
-            rf = np.expm1(self.reg.predict(self.scaler.transform(self._X.loc[test.index])))
-            m3 = test["media_3_actual"].to_numpy(float)
-            m3 = np.where(np.isnan(m3), test[c("total_sold")].to_numpy(float), m3)
+        v = self.blend_validacion
+        if v is not None and len(v):
             w = 1.0 if self.blend_weight is None else self.blend_weight
             partes.append(pd.DataFrame({
-                "id": test[c("id")].to_numpy(), "fecha": test["fecha"].to_numpy(),
+                "id": v["id"].to_numpy(), "fecha": v["fecha"].to_numpy(),
                 "origen": "modelo", "prob": np.nan,
-                "pred": im.blend(w, rf, m3), "real": test["target"].to_numpy(float),
+                "pred": im.blend(w, v["rf"].to_numpy(float), v["media_3"].to_numpy(float)),
+                "real": v["real"].to_numpy(float),
             }))
         sv = self._sale_val
         if sv is not None and len(sv):
@@ -1237,9 +1390,11 @@ class SalesForecastModel:
                     [partes[0]["id"], partes[0]["fecha"]])
                 partes[0]["prob"] = llave.reindex(idx).to_numpy(float)
             if self.estimacion_por_promedio:
+                top = (self._top_interno if self._top_interno is not None
+                       else self._top_prods)
                 p = sv[(sv["actual"] <= 0) & (sv["media_3"] > 0)
                        & (sv["meses_con_venta"] >= self.min_months)
-                       & sv["id"].isin(self._top_prods) & sv["target"].notna()]
+                       & sv["id"].isin(top) & sv["target"].notna()]
                 if len(p):
                     partes.append(pd.DataFrame({
                         "id": p["id"].to_numpy(), "fecha": p["fecha"].to_numpy(),
@@ -1258,7 +1413,8 @@ class SalesForecastModel:
         para los productos con monto predicho: la cota superior a nivel de
         servicio nivel_servicio, expm1(log1p(pred) + q), donde q es el cuantil
         de los residuos log1p(real) - log1p(pred) de la validacion interna
-        (ver _validacion_stock) por cubeta de prob_venta. Sin probabilidad de
+        dentro del entrenamiento (ver _validacion_stock; nunca la prueba
+        interna) por cubeta de prob_venta. Sin probabilidad de
         venta se usa el cuantil global. Las unidades son el techo del stock
         entre el ultimo precio promedio conocido. Guarda calibracion_stock
         (cuantiles de 0,5 / 0,7 / 0,9 y el nivel elegido) y stock_validacion.

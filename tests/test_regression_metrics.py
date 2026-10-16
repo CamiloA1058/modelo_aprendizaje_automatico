@@ -47,15 +47,23 @@ class RegressorTrainedOnlyOnTrainRowsTest(unittest.TestCase):
         captured = {}
         real_fit = tk.RandomForestRegressor.fit
 
+        llamadas = []
+
         def spy_fit(self_rf, X, y, **kwargs):
             # y conserva el índice de _df_train hasta este punto (no se
             # convierte a numpy antes de llegar aquí).
-            captured["y_index"] = list(y.index)
-            captured["n_rows"] = X.shape[0]
+            llamadas.append({"y_index": list(y.index), "n_rows": X.shape[0]})
             return real_fit(self_rf, X, y, **kwargs)
 
         with mock.patch.object(tk.RandomForestRegressor, "fit", spy_fit):
             self.model.train_regressor()
+
+        # 1.ª llamada: regresor de producción; 2.ª: regresor temporal de la
+        # validación interna (solo entrenamiento interno).
+        self.assertEqual(len(llamadas), 2)
+        captured.update(llamadas[0])
+        interno = set(llamadas[1]["y_index"])
+        self.assertTrue(interno <= set(self.model._particion_interna()["tr"]))
 
         train_idx = set(self.model._train_idx)
         test_idx = set(self.model._test_idx)

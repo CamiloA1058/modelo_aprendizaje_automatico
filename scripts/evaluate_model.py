@@ -9,6 +9,9 @@ la partición de PRUEBA, con líneas base de comparación:
     predice la clase más frecuente de ENTRENAMIENTO).
   - Regresor: tabla MAE/MSE/RMSE/R2/MASE del modelo contra los baselines
     "ingenuo" y "media_3" (ver SalesForecastModel.train_regressor).
+  - Mezcla w*RF + (1-w)*media_3 y probabilidad de venta: w y el umbral se
+    eligen con la validación interna DENTRO del entrenamiento; esta
+    partición de prueba interna solo reporta.
 
 Genera:
   outputs/reports/evaluacion_modelo.txt
@@ -21,6 +24,7 @@ Uso
 """
 
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -48,13 +52,22 @@ def main():
     inicio = time.time()
     ensure_output_dirs()
 
-    model = SalesForecastModel(filepath=DEFAULT_DATASET)
+    # La predicción del mes siguiente va a una carpeta temporal: este script
+    # solo evalúa (la de producción la escribe scripts/entrenar.py).
+    tmp = tempfile.TemporaryDirectory()
+    model = SalesForecastModel(filepath=DEFAULT_DATASET,
+                               output_path=Path(tmp.name) / "pred.csv")
     model.load_and_clean()
     model.build_features()
     model.cluster()
     model.prepare_split()
     model.train_classifier()
     model.train_regressor()
+    # Probabilidad de venta (umbral con la validación interna; exactitud en
+    # la prueba interna): mismos pasos que entrenar.py, sin graficar.
+    model.predict_next_month()
+    model.estimar_por_promedio()
+    model.agregar_probabilidad_venta()
 
     # ── Clasificador: predicciones de prueba y línea base de mayoría ────────
     y_tr = model._y.iloc[model._train_idx]
@@ -158,10 +171,23 @@ def main():
     lineas.append("")
     lineas.append("Mezcla (modelo + media de 3 meses) — predicción del sistema")
     lineas.append("-" * 60)
+    val = model.blend_validacion
     lineas.append(
         f"Predicción = w x RF + (1 - w) x media_3, con w = "
-        f"{model.blend_weight:.1f} elegido solo con esta partición de prueba "
-        f"interna (mínimo |suma predicha - suma real|)."
+        f"{model.blend_weight:.1f} elegido con la validación interna DENTRO "
+        f"del entrenamiento (mínimo |suma predicha - suma real|): un regresor "
+        f"temporal ajustado con los primeros meses de entrenamiento de cada "
+        f"producto ({int(val['n_train'].iloc[0]):,} filas) predice sus "
+        f"últimos meses de entrenamiento ({len(val):,} filas). Esta partición "
+        f"de prueba interna no participa en la elección: solo reporta."
+    )
+    suma_val = float(val["real"].sum())
+    pred_val = model.blend_weight * val["rf"] + (1 - model.blend_weight) * val["media_3"]
+    lineas.append(
+        f"En la validación interna (selección, no es un resultado): razón de "
+        f"sumas RF {float(val['rf'].sum()) / suma_val:.4f}, mezcla "
+        f"{float(pred_val.sum()) / suma_val:.4f}, media_3 "
+        f"{float(val['media_3'].sum()) / suma_val:.4f}."
     )
     lineas.append(f"{'Métrica':<16}{'RF':>20}{'Mezcla':>20}{'Media_3':>20}")
     for k in ("mae", "rmse", "r2", "mase"):
@@ -180,6 +206,19 @@ def main():
         f"{suma_m3 / suma_real:>20,.4f}"
     )
     lineas.append("Razón de sumas = suma predicha / suma real en la prueba.")
+
+    lineas.append("")
+    lineas.append("Probabilidad de venta (¿se venderá el mes siguiente?)")
+    lineas.append("-" * 60)
+    lineas.append(
+        f"Umbral {model.sale_threshold:.2f}, elegido con la validación interna "
+        f"dentro del entrenamiento ({model._sale_n_val:,} filas; exactitud de "
+        f"selección {model.sale_val_accuracy:.4f}, optimista por construcción)."
+    )
+    lineas.append(
+        f"Exactitud en la prueba interna (n={model._sale_n_test:,}): "
+        f"{model.sale_test_accuracy:.4f} (la que muestra el dashboard)."
+    )
 
     elapsed = time.time() - inicio
     lineas.append("")

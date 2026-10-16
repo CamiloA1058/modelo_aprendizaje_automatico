@@ -27,6 +27,7 @@ class ProbVentaApiTest(unittest.TestCase):
         model.blend_weight = 0.3
         model.sale_threshold = 0.45
         model.sale_val_accuracy = 0.71
+        model.sale_test_accuracy = 0.68
         c = model._c
         m = pd.to_datetime(["2026-01-01", "2026-02-01", "2026-03-01"])
         model.df = pd.DataFrame({
@@ -75,6 +76,7 @@ class ProbVentaApiTest(unittest.TestCase):
         self.assertEqual(d["n_con_prob_venta"], 3)
         self.assertEqual(d["sale_threshold"], 0.45)
         self.assertEqual(d["sale_val_accuracy"], 0.71)
+        self.assertEqual(d["sale_test_accuracy"], 0.68)
 
     def test_summary_no_cambia_lo_demas(self):
         d = self.client.get("/api/summary").get_json()

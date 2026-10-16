@@ -62,9 +62,11 @@ def _msg_clasificador(m):
             f"exactitud {pct_es(m['accuracy'])}")
 
 
-def _msg_umbral(umbral, exactitud):
-    return (f"  → Umbral {fmt_es(umbral, 2)} | exactitud de validación "
-            f"interna {pct_es(exactitud)}")
+def _msg_umbral(umbral, exactitud_prueba):
+    """El umbral se elige con la validación interna (dentro del
+    entrenamiento); la exactitud que se muestra es la de la prueba interna."""
+    return (f"  → Umbral {fmt_es(umbral, 2)} (elegido con la validación interna) | "
+            f"exactitud en la prueba interna {pct_es(exactitud_prueba)}")
 
 
 def _log(msg):
@@ -137,7 +139,7 @@ def _run_model(filepath, col_map, params):
         if model.probabilidad_venta:
             _log("✔ Calculando la probabilidad de venta de cada producto…")
             model.agregar_probabilidad_venta()
-            _log(_msg_umbral(model.sale_threshold, model.sale_val_accuracy))
+            _log(_msg_umbral(model.sale_threshold, model.sale_test_accuracy))
 
         if model.stock_sugerido:
             _log("✔ Calculando el stock sugerido de cada producto…")
@@ -328,6 +330,7 @@ def api_summary():
         "n_con_prob_venta": n_con_prob_venta,
         "sale_threshold": getattr(model, "sale_threshold", None),
         "sale_val_accuracy": getattr(model, "sale_val_accuracy", None),
+        "sale_test_accuracy": getattr(model, "sale_test_accuracy", None),
         "blend_weight": blend_weight,
         "base_total":  round(base_total, 0),
         "variacion":   round(variacion, 1),

@@ -14,8 +14,12 @@ estudio_caso.evaluar_mes para fijar el universo del dashboard de cada mes
 Objetivo: vende = ventas del mes siguiente > 0, sobre el calendario mensual
 completo. El marco de entrenamiento incluye filas con mes actual en cero si el
 producto vendio en los ultimos 6 meses y usa la particion temporal 80/20 por
-producto de produccion; el 20 % es la validacion interna con la que se elige el
-umbral de probabilidad (maximiza la exactitud). Nada se elige con el holdout.
+producto de produccion (el 20 % es la prueba interna, solo para reportar). El
+umbral de probabilidad (maximiza la exactitud) se elige con la validacion
+interna DENTRO del 80 % de entrenamiento (mismo procedimiento que
+SalesForecastModel.agregar_probabilidad_venta: modelo temporal con el
+entrenamiento interno y la variable cluster del KMeans interno). Nada se elige
+con la prueba interna ni con el holdout.
 
 Modelos: RandomForest (sin pesos y balanceado), XGBoost (binary:logistic) y
 regresion logistica; reglas: "vendio el mes anterior", ">= 2 de los ultimos 3
@@ -54,6 +58,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 from ventas_forecast import case_study as cs  # noqa: E402
 from ventas_forecast import sale_probability as sp  # noqa: E402
+from ventas_forecast import validacion_interna as vi  # noqa: E402
 from ventas_forecast.model import SalesForecastModel  # noqa: E402
 from ventas_forecast.paths import FIGURES, REPORTS, ensure_output_dirs  # noqa: E402
 import estudio_caso as ec  # noqa: E402
@@ -116,6 +121,12 @@ def datos_mes(mes, tmp):
     d = sp.add_probability_features(model.df, c("id"), c("total_sold"), c("frequency"))
     frame, tr, te = sp.sale_train_frame(d, c("id"), c("total_sold"), model.train_ratio)
     feats = columnas_modelo(model)
+    # Particion interna (seleccion del umbral) igual que produccion.
+    sub = frame.iloc[list(tr)]
+    en_tr = vi.particion_temporal(sub[c("id")], sub["fecha"], model.train_ratio)
+    tr_in = [i for i, m in zip(tr, en_tr) if m]
+    va_in = [i for i, m in zip(tr, en_tr) if not m]
+    frame["cluster_interno"] = model._cluster_interno(frame)
 
     pred = d[d["fecha"] == model._ultimo_mes].copy()
     pred["id"] = pred[c("id")].astype(str)
@@ -133,6 +144,7 @@ def datos_mes(mes, tmp):
     return {
         "mes": mes, "feats": feats, "total_col": c("total_sold"),
         "frame": frame, "train_idx": tr, "test_idx": te,
+        "train_in_idx": tr_in, "val_in_idx": va_in,
         "pred": pred, "n_a": int(pred["univ_a"].sum()), "n_b": int(pred["univ_b"].sum()),
     }
 
@@ -184,12 +196,31 @@ def importancia(modelo, feats):
     return dict(zip(feats, v / v.sum() if v.sum() else v))
 
 
+def _ajustar(nombre, X, y, filas, monto):
+    """Modelo `nombre` ajustado con las filas dadas y su transformacion de
+    entrada (la regresion logistica estandariza solo con esas filas)."""
+    m = construir(nombre)
+    if nombre == "regresion_logistica":
+        esc = StandardScaler().fit(_x_lineal(X.iloc[filas], monto))
+        ft = lambda Z: esc.transform(_x_lineal(Z, monto))  # noqa: E731
+    else:
+        ft = lambda Z: Z.to_numpy()  # noqa: E731
+    m.fit(ft(X.iloc[filas]), y[filas])
+    return m, ft
+
+
 def ajustar_mes(datos, nombres):
-    """Ajusta cada modelo con la particion de entrenamiento, elige el umbral con
-    la validacion interna y predice las filas del mes siguiente."""
+    """Para cada modelo: umbral elegido con la validacion interna (modelo
+    temporal ajustado con el entrenamiento interno, cluster del KMeans
+    interno); modelo final ajustado con toda la particion de entrenamiento;
+    exactitud reportada en la prueba interna; prediccion de las filas del mes
+    siguiente."""
     feats, frame = datos["feats"], datos["frame"]
-    tr, te = datos["train_idx"], datos["test_idx"]
+    tr, te = list(datos["train_idx"]), list(datos["test_idx"])
+    tr_in, va_in = datos["train_in_idx"], datos["val_in_idx"]
     X = frame[feats].fillna(0)
+    X_in = X.copy()
+    X_in["cluster"] = frame["cluster_interno"].to_numpy()
     y = frame["vende"].to_numpy()
     pred = datos["pred"]
     Xp = pred[feats].fillna(0)
@@ -199,23 +230,21 @@ def ajustar_mes(datos, nombres):
     filas = pred[["id", "real_vende", "origen", "top1900", "univ_a", "univ_b"]].copy()
     filas["mes"] = datos["mes"]
     filas["actual"] = pred[datos["total_col"]].to_numpy()
-    meta = {"umbral": {}, "val_accuracy": {}, "importancia": {}, "n_train": len(tr),
-            "n_val": len(te), "tasa_val": float(y[te].mean())}
+    meta = {"umbral": {}, "val_accuracy": {}, "test_accuracy": {}, "importancia": {},
+            "n_train": len(tr), "n_val": len(va_in), "n_test": len(te),
+            "tasa_val": float(y[va_in].mean()), "tasa_test": float(y[te].mean())}
     for nombre in nombres:
-        m = construir(nombre)
-        if nombre == "regresion_logistica":
-            esc = StandardScaler().fit(_x_lineal(X.iloc[tr], monto))
-            ft = lambda Z: esc.transform(_x_lineal(Z, monto))  # noqa: E731
-        else:
-            ft = lambda Z: Z.to_numpy()  # noqa: E731
-        m.fit(ft(X.iloc[tr]), y[tr])
-        p_val = m.predict_proba(ft(X.iloc[te]))[:, 1]
-        umbral = sp.choose_threshold(y[te], p_val)
+        m_in, ft_in = _ajustar(nombre, X_in, y, tr_in, monto)
+        p_val = m_in.predict_proba(ft_in(X_in.iloc[va_in]))[:, 1]
+        umbral = sp.choose_threshold(y[va_in], p_val)
+        m, ft = _ajustar(nombre, X, y, tr, monto)
+        p_te = m.predict_proba(ft(X.iloc[te]))[:, 1]
         p = m.predict_proba(ft(Xp))[:, 1]
         filas[f"proba_{nombre}"] = p
         filas[f"pred_{nombre}"] = (p >= umbral).astype(int)
         meta["umbral"][nombre] = umbral
-        meta["val_accuracy"][nombre] = float(((p_val >= umbral).astype(int) == y[te]).mean())
+        meta["val_accuracy"][nombre] = float(((p_val >= umbral).astype(int) == y[va_in]).mean())
+        meta["test_accuracy"][nombre] = float(((p_te >= umbral).astype(int) == y[te]).mean())
         meta["importancia"][nombre] = importancia(m, feats)
     for regla, v in sp.rule_predictions(pred, datos["total_col"]).items():
         filas[f"pred_{regla}"] = v.astype(int)
@@ -302,11 +331,13 @@ def texto(df, cal, filas_por_mes, meta_por_mes, nombres_modelo):
          "en meses reales no vistos (2026-04..2026-09).",
          "Para cada mes M se entrena con la V6 mas el holdout anterior a M (nunca M). Objetivo "
          "vende = ventas de M > 0. Marco de entrenamiento: filas con mes actual > 0 o con ventas "
-         "en los ultimos 6 meses; particion temporal 80/20 por producto; el 20 % es la "
-         "validacion interna que fija el umbral de probabilidad (maximiza la exactitud). "
+         "en los ultimos 6 meses; particion temporal 80/20 por producto (el 20 % es la "
+         "prueba interna, solo para reportar). El umbral de probabilidad (maximiza la "
+         "exactitud) se elige con la validacion interna dentro del 80 % de entrenamiento "
+         "(modelo temporal con el entrenamiento interno, igual que produccion). "
          "El escalador (solo regresion logistica) y KMeans se ajustan solo con entrenamiento. "
-         "Nada se eligio con el holdout. Septiembre del holdout llega al 22 y esta incompleto "
-         "(baja la tasa real de venta).",
+         "Nada se eligio con la prueba interna ni con el holdout. Septiembre del holdout llega "
+         "al 22 y esta incompleto (baja la tasa real de venta).",
          "Variables: logs de ventas/precio, FRECUENCIA, rezagos 1/2/3/6, mean_3/mean_6, mes "
          "siguiente (seno/coseno), cluster, y nuevas: meses desde la ultima venta, meses con "
          "venta en los ultimos 3/6/12, rezago 12, rezagos 1-3 de FRECUENCIA y su media, edad "
@@ -362,9 +393,18 @@ def texto(df, cal, filas_por_mes, meta_por_mes, nombres_modelo):
         L.append(f"{ETIQUETAS.get(n, n):<24}" + "".join(
             f"{_f(meta_por_mes[m]['umbral'][n], 2):>8} ({_p(meta_por_mes[m]['val_accuracy'][n], 0):>5})"
             for m in meses))
-    L.append(f"{'filas ent./val.':<24}" + "".join(
+    L.append(f"{'filas ent./val. interna':<24}" + "".join(
         f"{_n(meta_por_mes[m]['n_train']) + '/' + _n(meta_por_mes[m]['n_val']):>16}"
         for m in meses))
+    L.append("")
+    L += ["EXACTITUD EN LA PRUEBA INTERNA (umbral de la validacion interna; sin holdout)",
+          "-" * 72, f"{'Modelo':<24}" + "".join(f"{m:>10}" for m in meses) + f"{'media':>10}"]
+    for n in nombres_modelo:
+        acc = [meta_por_mes[m]["test_accuracy"][n] for m in meses]
+        L.append(f"{ETIQUETAS.get(n, n):<24}" + "".join(f"{_p(a):>10}" for a in acc)
+                 + f"{_p(float(np.mean(acc))):>10}")
+    L.append(f"{'filas de prueba interna':<24}" + "".join(
+        f"{_n(meta_por_mes[m]['n_test']):>10}" for m in meses))
     L.append("")
 
     L += ["CUMPLIMIENTO DE LA META (70 %)", "-" * 72]

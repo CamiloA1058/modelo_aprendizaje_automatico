@@ -1,7 +1,8 @@
 """
 Mezcla del sistema: ventas_predichas = w * RF + (1 - w) * media_3, con w
-elegido SOLO con la particion de prueba interna del regresor (criterio de
-sesgo de la suma). El RF puro se conserva en ventas_predichas_rf.
+elegido SOLO con la validacion interna dentro de la particion de
+entrenamiento (criterio de sesgo de la suma); la prueba interna solo reporta.
+El RF puro se conserva en ventas_predichas_rf.
 
 Ejecutar:  python -m unittest tests.test_blend_model
 """
@@ -44,7 +45,7 @@ class BlendWeightUsesOnlyInternalValidationTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.model = _trained_model(self._tmp.name)
 
-    def test_weight_chosen_with_internal_test_partition_and_bias_criterion(self):
+    def test_weight_chosen_with_internal_validation_and_bias_criterion(self):
         captured = {}
         real_choose = im.choose_blend_weight
 
@@ -56,11 +57,11 @@ class BlendWeightUsesOnlyInternalValidationTest(unittest.TestCase):
         with mock.patch.object(tk.im, "choose_blend_weight", spy):
             self.model.train_regressor()
 
-        res = self.model.reg_test_results
-        np.testing.assert_allclose(captured["real"], res["real"].to_numpy())
-        np.testing.assert_allclose(captured["rf"], res["predicho"].to_numpy())
+        val = self.model.blend_validacion
+        np.testing.assert_allclose(captured["real"], val["real"].to_numpy())
+        np.testing.assert_allclose(captured["rf"], val["rf"].to_numpy())
         self.assertEqual(captured["kwargs"].get("criterion"), "sesgo")
-        self.assertEqual(len(captured["real"]), self.model.reg_metrics["n_test"])
+        self.assertEqual(len(captured["real"]), len(val))
 
     def test_weight_is_on_the_grid_and_stored(self):
         self.model.train_regressor()
