@@ -8,32 +8,35 @@ Sistema de predicción de ventas y decisiones de stock (Reforzar / Mantener / Re
 
 Dataset vigente: `data/raw/Query_Result_V6.csv` (facturas de venta reales del taller de los últimos dos años, sin servicios; 48.028 registros diarios, 3.584 productos).
 
-### Métricas — clasificador (`outputs/reports/evaluacion_modelo.txt`, prueba n=8.942)
+Regla de validación: nada de lo reportado se elige con los datos sobre los que se reporta. Hiperparámetros, peso de la mezcla, umbral de venta y cuantiles del stock se eligen solo con el entrenamiento (validación cruzada mensual o validación interna temporal); la prueba interna (último 20 % de los meses de cada producto) solo reporta y el estudio de caso es la evaluación final (entrada "[Validación] V1" de `docs/CHANGELOG.md`).
 
-Métricas principales (robustas al desbalance de clases; Reducir = 78,42 % de la prueba):
+### Métricas — clasificador (`outputs/reports/evaluacion_modelo.txt`, prueba interna n=6.242)
+
+Métricas principales (robustas al desbalance de clases; Reducir = 79,80 % de la prueba):
 
 | Métrica | Modelo | Línea base (siempre "Reducir") |
 |---|---|---|
-| F1 macro | 45.25% | 29.30% |
-| Accuracy balanceada | 50.16% | 33.33% |
+| F1 macro | 0,4502 | 0,2959 |
+| Exactitud balanceada | 0,4974 | 0,3333 |
 
 Métricas ponderadas por soporte de clase (referencia):
 
 | Métrica | Modelo | Línea base (siempre "Reducir") |
 |---|---|---|
-| Accuracy | 67.51% | 78.42% |
-| F1 ponderado | 70.83% | 68.93% |
+| Exactitud | 0,6831 | 0,7980 |
+| F1 ponderado | 0,7202 | 0,7083 |
 
-### Métricas — regresor (`outputs/reports/evaluacion_modelo.txt`, prueba top productos, n=5.062)
+### Métricas — regresor (`outputs/reports/evaluacion_modelo.txt`, prueba interna, top productos, n=4.472)
 
-| Métrica | Modelo | Ingenuo | Media_3 |
-|---|---|---|---|
-| MAE (COP) | 385,016 | 644,901 | 493,789 |
-| RMSE (COP) | 1,244,584 | 1,651,228 | 1,232,872 |
-| R² | 0.6005 | 0.2969 | 0.6080 |
-| MASE | 0.8887 | 1.4885 | 1.1397 |
+| Métrica | Modelo (RF) | Mezcla (w = 0,0) | Ingenuo | Media_3 |
+|---|---|---|---|---|
+| MAE (COP) | 232.349 | 314.974 | 427.404 | 314.974 |
+| RMSE (COP) | 907.724 | 930.639 | 1.254.946 | 930.639 |
+| R² | 0,4213 | 0,3917 | −0,1061 | 0,3917 |
+| MASE | 1,0382 | 1,4074 | 1,9097 | 1,4074 |
+| Razón de sumas | 0,5937 | 1,2919 | — | 1,2919 |
 
-El regresor supera a ambas líneas base en MAE y MASE (MASE < 1); Media_3 obtiene mejor RMSE y R² en esta partición (ver detalle y discusión en `docs/CHANGELOG.md`, entrada "[Limpieza] - 2026-09-23").
+Con w elegido en la validación interna (w = 0,0) la mezcla de abril es la media de 3 meses.
 
 Ver [docs/CHANGELOG.md](docs/CHANGELOG.md) para el historial completo de decisiones y resultados, y [docs/BITACORA.md](docs/BITACORA.md) para reportes detallados.
 
@@ -150,15 +153,15 @@ Los resultados se guardan en `outputs/` (gitignored):
 
 Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen general (KPIs, historial, distribución de decisiones, top de productos), vista por grupo de producto, catálogo de predicciones con búsqueda, filtros y descarga del CSV, detalle por producto y ejecución del modelo con subida de CSV y parámetros.
 
-**Predicción combinada.** El monto predicho por producto (`ventas_predichas`) es `w x RF + (1 - w) x media_3`, donde `media_3` es el promedio de los últimos 3 meses del producto y `w` (0, 0,1 ... 1) se elige solo con la partición de prueba interna del regresor, minimizando |suma predicha - suma real|. El RF puro se conserva en `ventas_predichas_rf`. El KPI "Ventas predichas" muestra la suma de la mezcla (con `w` en porcentaje), el detalle del producto agrega "Solo modelo: $..." y el CSV descargable trae ambas columnas. En la última corrida real `w` = 0,5; en la prueba interna la razón suma predicha/real pasó de 0,63 (RF) a 0,99 (mezcla) con MAE 227.468 -> 252.409 COP (ver `outputs/reports/evaluacion_modelo.txt` y la entrada "[Sistema] Predicción combinada en el dashboard" de `docs/CHANGELOG.md`).
+**Predicción combinada.** El monto predicho por producto (`ventas_predichas`) es `w x RF + (1 - w) x media_3`, donde `media_3` es el promedio de los últimos 3 meses del producto y `w` (0, 0,1 ... 1) se elige con la validación interna dentro del entrenamiento (un regresor temporal ajustado con los primeros meses de entrenamiento de cada producto predice sus últimos meses de entrenamiento), minimizando |suma predicha - suma real|; la prueba interna solo reporta. El RF puro se conserva en `ventas_predichas_rf`. El KPI "Ventas predichas" muestra la suma de la mezcla (con `w` en porcentaje), el detalle del producto agrega "Solo modelo: $..." y el CSV descargable trae ambas columnas. En la última corrida real `w` = 0,0 (en la validación interna el RF predice el 23,6 % de la suma real y la media de 3 meses el 94,8 %), así que el monto combinado de abril es la media de 3 meses; en la prueba interna la razón suma predicha/real es 0,59 (RF) y 1,29 (mezcla) (ver `outputs/reports/evaluacion_modelo.txt` y la entrada "[Validación] V1" de `docs/CHANGELOG.md`).
 
 **Estimación por promedio.** Los productos que no vendieron en el último mes pero sí en alguno de los 2 meses anteriores (con al menos `min_months` meses con ventas y dentro de los 1.900 con más ventas) aparecen aparte: su monto es el promedio de los últimos 3 meses (`media_3`), no una predicción del modelo, y su decisión es "Sin recomendación (estimación por promedio)", porque el clasificador es peor que la clase mayoritaria en ellos. Se calculan en `SalesForecastModel.estimar_por_promedio()` (activo por defecto, `estimacion_por_promedio=False` lo desactiva) y el CSV trae la columna `origen_estimacion` ("modelo" / "promedio"). El KPI "Ventas predichas" suma ambos grupos y detalla cada uno; Reforzar/Mantener/Reducir y la dona cuentan solo los productos del modelo, y un KPI aparte muestra cuántos productos quedan sin recomendación. El catálogo tiene el filtro "Sin recomendación (estimación por promedio)". En abril de 2026 (V6): 697 productos con decisión, 348 por promedio, 247,0 M + 60,6 M = 307,6 M (entrada "[Sistema] Estimación por promedio..." de `docs/CHANGELOG.md`).
 
-**Probabilidad de venta.** Para todos los productos (los del modelo y los de estimación por promedio) el sistema calcula la probabilidad de que tengan ventas el mes predicho y la traduce a "Se venderá: Sí/No". `SalesForecastModel.agregar_probabilidad_venta()` (activo por defecto, `probabilidad_venta=False` lo desactiva) entrena un Random Forest binario solo con la partición de entrenamiento y elige el umbral con la validación interna; el CSV trae las columnas `prob_venta` (0 a 1) y `se_vendera`. El resumen muestra el KPI "Probablemente se venderán: N de M productos" (con el umbral y la exactitud de validación interna), las tablas del resumen y el catálogo tienen las columnas "Prob. de venta" y "Se venderá", el catálogo permite filtrar por "Se venderá / No se venderá" y ordenar por probabilidad de venta, y el detalle del producto la muestra también para los de promedio. En el estudio de caso (abril a septiembre de 2026) acierta si habrá venta en 70,8 % de los producto-mes agrupados (69,5 % a 72,0 % por mes); los montos no cambian (entrada "[Sistema] Probabilidad de venta en el dashboard" de `docs/CHANGELOG.md`).
+**Probabilidad de venta.** Para todos los productos (los del modelo y los de estimación por promedio) el sistema calcula la probabilidad de que tengan ventas el mes predicho y la traduce a "Se venderá: Sí/No". `SalesForecastModel.agregar_probabilidad_venta()` (activo por defecto, `probabilidad_venta=False` lo desactiva) entrena un Random Forest binario solo con la partición de entrenamiento y elige el umbral con la validación interna dentro de ese entrenamiento (la exactitud que muestra el dashboard es la de la prueba interna, 79,2 % en abril); el CSV trae las columnas `prob_venta` (0 a 1) y `se_vendera`. El resumen muestra el KPI "Probablemente se venderán: N de M productos" (con el umbral y la exactitud en la prueba interna), las tablas del resumen y el catálogo tienen las columnas "Prob. de venta" y "Se venderá", el catálogo permite filtrar por "Se venderá / No se venderá" y ordenar por probabilidad de venta, y el detalle del producto la muestra también para los de promedio. En el estudio de caso (abril a septiembre de 2026) acierta si habrá venta en 70,1 % de los producto-mes agrupados (69,0 % a 71,6 % por mes); los montos no cambian (entrada "[Sistema] Probabilidad de venta en el dashboard" de `docs/CHANGELOG.md`).
 
-**Stock sugerido (70 %).** Para cada producto con monto predicho el sistema calcula un nivel de abastecimiento: si se tiene en inventario hasta ese valor, en los meses de prueba (abril a septiembre de 2026) se cubrió la demanda de cerca de 7 de cada 10 productos (68,4 % agrupado, incluye los que no vendieron; 47,3 % entre los que vendieron; stock total 1,28 veces lo vendido). `SalesForecastModel.agregar_stock_sugerido()` (activo por defecto, `stock_sugerido=False` lo desactiva, `nivel_servicio=0.70`) corrige la predicción con el cuantil 70 % de los errores de la validación interna por cubeta de probabilidad de venta; el CSV trae `stock_sugerido` (COP) y `stock_sugerido_unidades`, y el dashboard la columna "Stock sugerido (70 %)" en Productos, detalle y Grupos. No cambia decisiones, montos ni totales (entrada "[Sistema] Stock sugerido por producto" de `docs/CHANGELOG.md`; la hoja de producto de `prediccion_vs_real.xlsx` trae "¿Cubrió la demanda?").
+**Stock sugerido (70 %).** Para cada producto con monto predicho el sistema calcula un nivel de abastecimiento: si se tiene en inventario hasta ese valor, en los meses de prueba (abril a septiembre de 2026) se cubrió la demanda de cerca de 7 de cada 10 productos (71,8 % agrupado, incluye los que no vendieron; 53,0 % entre los que vendieron; stock total 1,45 veces lo vendido). `SalesForecastModel.agregar_stock_sugerido()` (activo por defecto, `stock_sugerido=False` lo desactiva, `nivel_servicio=0.70`) corrige la predicción con el cuantil 70 % de los errores de la validación interna (dentro del entrenamiento) por cubeta de probabilidad de venta; el CSV trae `stock_sugerido` (COP) y `stock_sugerido_unidades`, y el dashboard la columna "Stock sugerido (70 %)" en Productos, detalle y Grupos. No cambia decisiones, montos ni totales (entrada "[Sistema] Stock sugerido por producto" de `docs/CHANGELOG.md`; la hoja de producto de `prediccion_vs_real.xlsx` trae "¿Cubrió la demanda?").
 
-**Vista por grupo de producto.** La vista "Grupos" suma las predicciones por producto de cada grupo del catálogo `data/raw/grupos_productos.csv` (la línea o proveedor con la que compra el taller): productos con monto, cuántos se venderán, predicción del grupo, ventas del mes anterior, variación y porcentaje del total, con buscador; un clic en un grupo abre "Productos" filtrado por él. `SalesForecastModel.agregar_resumen_grupo()` (activo por defecto, `resumen_por_grupo=False` lo desactiva) solo lee los resultados y no cambia ninguna predicción, decisión ni total. En abril a septiembre de 2026 esta suma acertó el 67,6 % del valor vendido por grupo (73,4 % en los 20 grupos con más ventas); úsela como guía para planear pedidos por línea (entrada "[Sistema] Vista por grupo de producto" de `docs/CHANGELOG.md`). La hoja "Grupos" de `prediccion_vs_real.xlsx` trae la comparación contra lo real mes a mes.
+**Vista por grupo de producto.** La vista "Grupos" suma las predicciones por producto de cada grupo del catálogo `data/raw/grupos_productos.csv` (la línea o proveedor con la que compra el taller): productos con monto, cuántos se venderán, predicción del grupo, ventas del mes anterior, variación y porcentaje del total, con buscador; un clic en un grupo abre "Productos" filtrado por él. `SalesForecastModel.agregar_resumen_grupo()` (activo por defecto, `resumen_por_grupo=False` lo desactiva) solo lee los resultados y no cambia ninguna predicción, decisión ni total. En abril a septiembre de 2026 esta suma acertó el 68,9 % del valor vendido por grupo (75,6 % en los 20 grupos con más ventas); úsela como guía para planear pedidos por línea (entrada "[Sistema] Vista por grupo de producto" de `docs/CHANGELOG.md`). La hoja "Grupos" de `prediccion_vs_real.xlsx` trae la comparación contra lo real mes a mes.
 
 ```
 Navegador (dashboard/dashboard.html)

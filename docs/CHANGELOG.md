@@ -1,3 +1,74 @@
+## [Validación] V1: ninguna selección con los datos de prueba - 2026-10-16
+
+Un revisor académico señaló que el procedimiento de validación y entrenamiento "requiere verificación". Principio adoptado: **nada de lo que se reporta como resultado se elige, ajusta o selecciona con los mismos datos sobre los que se reporta** (pesos, hiperparámetros, umbrales, cuantiles, elección de modelo).
+
+- La selección usa solo la partición de entrenamiento: validación cruzada temporal (pliegues mensuales) o una **validación interna temporal** dentro del entrenamiento (los primeros ~80 % de los meses de entrenamiento de cada producto entrenan un modelo temporal; el último ~20 % lo valida; misma regla de `_build_train_frame`, aplicada una segunda vez).
+- La **prueba interna** (último 20 % de los meses de cada producto) solo reporta.
+- El **estudio de caso** (origen rodante sobre los seis meses del holdout, cada mes entrenado solo con datos anteriores) es la evaluación final fuera de muestra.
+
+### Auditoría de las selecciones
+
+| Elemento | Dónde se elegía | Dónde se reporta | ¿Limpio antes? | Corrección |
+|---|---|---|---|---|
+| Peso w de la mezcla w·RF + (1−w)·media_3 | Prueba interna del regresor (`train_regressor`) | Prueba interna (`evaluacion_modelo.txt`: R² 0,4799, razón 1,0126) y estudio de caso | **No** | Validación interna: regresor temporal (mismos hiperparámetros, log1p, top productos, escalador y KMeans reajustados solo con el entrenamiento interno) y criterio de sesgo de la suma |
+| Hiperparámetros del clasificador | GridSearchCV F1 macro en pliegues mensuales del entrenamiento; luego se **conservó** `max_depth=14` porque la prueba interna daba parecido | Prueba interna y estudio de caso | **No** (la decisión final miraba la prueba) | `DEFAULT_CLF_PARAMS` = ganador de la CV `{300, None, 3}`; `tune_rf.py` lo declara y deja la comparación de prueba solo como información |
+| Umbral de ¿se venderá? | Prueba interna del clasificador binario (`te`) | Misma prueba interna (79,3 %, tarjeta del dashboard) y estudio de caso | **No** | Validación interna (clasificador temporal con el entrenamiento interno); la exactitud se reporta en la prueba interna (`sale_test_accuracy`) |
+| Cuantiles del stock sugerido | Residuos de la prueba interna del regresor (con el w elegido ahí) y del clasificador de venta | Cobertura solo en el estudio de caso | Sí respecto del holdout; **no** respecto de "la prueba interna solo reporta" | Residuos de la validación interna |
+| k de KMeans | Silueta y codo con la partición de entrenamiento (`evaluate_k`) | Silueta como criterio, no como resultado | Sí | Sin cambio |
+| Escaladores (RobustScaler) y KMeans de producción | Ajustados solo con la partición de entrenamiento | — | Sí | Sin cambio (la validación interna reajusta los suyos con el entrenamiento interno) |
+| Umbrales de clase 1,15 / 0,90 | Valores fijos desde la primera versión del repositorio (2026-05-21); no hay registro de que se ajustaran con datos | — | Sí, hasta donde muestra el historial | Sin cambio |
+| Top 1.900 productos | Cuáles: suma de ventas de la partición de entrenamiento. Cuántos (1.900): valor fijo heredado, sin registro de ajuste | — | Sí, hasta donde muestra el historial | Sin cambio |
+| XGBoost en `compare_models.py` | GridSearchCV F1 macro en los mismos pliegues mensuales del entrenamiento | Prueba interna | Sí | Sin cambio; el RF usa ahora el ganador de la CV con la misma regla |
+| Variantes de `experimento_monto_producto.py` (w, Tweedie, umbral, corrección) | Prueba interna de cada origen | Holdout | Limpio respecto del holdout; usan la prueba interna para elegir | Sin cambio (experimento; la cifra de la tesis es la de producción) |
+
+### Cambios en el código
+
+- `src/ventas_forecast/validacion_interna.py` (nuevo): `particion_temporal(ids, fechas, ratio)`.
+- `SalesForecastModel`: `_particion_interna()` (entrenamiento interno / validación interna y KMeans interno), `_validacion_interna_regresor()`, `blend_validacion`, `REG_PARAMS`, `SALE_CLF_PARAMS`, `sale_test_accuracy`; `agregar_probabilidad_venta()` elige el umbral con la validación interna; `_validacion_stock()` usa la validación interna. Sin validación interna posible (datos mínimos), w = 1 (RF puro) y umbral 0,5.
+- `DEFAULT_CLF_PARAMS = {"n_estimators": 300, "max_depth": None, "min_samples_leaf": 3}`.
+- Dashboard: tarjeta "Métricas del modelo (prueba interna)"; "Acierto ¿se venderá?" y el KPI muestran `sale_test_accuracy`; el registro dice "Umbral 0,64 (elegido con la validación interna) | exactitud en la prueba interna 79,2 %"; notas de Grupos (69 % / 76 %) y Productos (72 % medido) con las cifras nuevas.
+- `scripts/evaluate_model.py` explica cómo se elige w y agrega la sección de probabilidad de venta; `scripts/experimento_probabilidad_venta.py` elige el umbral igual que producción y reporta la exactitud de cada modelo en la prueba interna.
+- Pruebas (TDD, RED observado contra el código anterior): `tests/test_seleccion_sin_prueba.py` (12: w y cuantiles no cambian al alterar los objetivos de la prueba interna, el w óptimo en la prueba puede ser otro, el modelo interno no ve los objetivos de la validación, umbral invariable al invertir las etiquetas de prueba, exactitud reportada en la prueba, KMeans interno), `DEFAULT_CLF_PARAMS` fijado al ganador de la CV, notas del dashboard; suite de 408 pruebas.
+
+### Resultado clave: w = 0 en abril
+
+En la validación interna el regresor temporal predice solo el 23,6 % de la suma real (la media de 3 meses, el 94,8 %), así que el w que minimiza el sesgo es **0,0**: la predicción combinada de abril es la media de 3 meses (con el top definido por la partición completa de entrenamiento w también da 0,0). En el estudio de caso w = 0,0 / 0,1 / 0,1 / 0,2 / 0,2 / 0,2 (antes 0,4 / 0,3 / 0,2 / 0,3 / 0,3 / 0,3). El RF puro (`ventas_predichas_rf`) no cambia.
+
+### Antes → después (V6 hasta el 31/03/2026; holdout `data/holdout/ventas_2026_04_09.csv`)
+
+**Clasificador, prueba interna (n = 6.242):** F1 macro 0,4501 → 0,4502; exactitud balanceada 0,5043 → 0,4974; exactitud 0,6684 → 0,6831; F1 ponderado 0,7126 → 0,7202; F1 por clase Reducir 0,7873 → 0,7967, Mantener 0,0816 → 0,0701, Reforzar 0,4814 → 0,4838. Línea base mayoritaria sin cambio (0,2959 / 0,3333 / 0,7980). CV del ganador 0,4377 ± 0,0086 (reconfirmada: tabla de la grilla idéntica).
+
+**Regresor, prueba interna (n = 4.472):** RF, ingenuo y media_3 sin cambio (MAE 232.349 / 427.404 / 314.974; RMSE 907.724 / 1.254.946 / 930.639; R² 0,4213 / −0,1061 / 0,3917; MASE 1,0382 / 1,9097 / 1,4074; razón de sumas RF 0,5937, media_3 1,2919). Mezcla: w 0,4 → 0,0; MAE 266.174 → 314.974; RMSE 860.530 → 930.639; R² 0,4799 → 0,3917; MASE 1,1893 → 1,4074; razón de sumas 1,0126 → 1,2919.
+
+**Probabilidad de venta (abril):** umbral 0,63 → 0,64; exactitud de la tarjeta 79,3 % (elegida y medida en la misma prueba interna) → 79,2 % (umbral de la validación interna, medida en la prueba interna, n = 11.703); exactitud en la validación interna 75,7 % (selección, no es resultado).
+
+**Comparación de modelos:** solo cambia la columna Random Forest de clasificación (la de arriba). Regresión A y B sin cambio (B: RF MAE 123.997, MASE 0,5540; XGBoost 129.795; ARIMA 175.739; Prophet 197.363; media_3 246.359; ingenuo 285.081).
+
+**Estudio de caso agrupado (4.560 decisiones, 4.155 montos):** F1 macro 0,4243 → 0,4273 (mayoritaria 0,2624 sin cambio); exactitud balanceada 0,4575 → 0,4569; exactitud 0,5682 → 0,5798; precisión Reducir 82,0 % → 80,7 %, Reforzar 41,0 % → 41,4 %, Mantener 12,0 % → 14,5 %. Mezcla: MAE 327.702 → 339.456, RMSE 936.047 → 943.216, razón 0,9071 → 0,9988. RF, ingenuo y media_3 sin cambio. F1 macro por mes 0,3599 / 0,4487 / 0,3652 / 0,4769 / 0,4329 / 0,4433 → 0,3636 / 0,4517 / 0,3573 / 0,4794 / 0,4329 / 0,4611.
+
+**`prediccion_vs_real.xlsx` (Tabla 11, millones de COP, predicción total / real):** abril 307,6 → 363,4 / 363,2; mayo 324,6 → 358,2 / 418,7; junio 381,6 → 399,5 / 263,0; julio 333,0 → 351,7 / 348,6; agosto 325,8 → 344,8 / 372,1; septiembre 296,4 → 315,8 / 354,4; total 1.969,1 → 2.133,5 / 2.119,9 (93 % → 100,6 %). La parte por promedio (60,6 / 55,5 / 54,0 / 73,6 / 59,8 / 40,1 M) no cambia.
+
+**¿Se venderá? (estudio de caso, 6.145 producto-mes):** 70,8 % → 70,1 % (4.348 → 4.305 aciertos); por mes 69,6 / 70,6 / 69,5 / 72,0 / 71,7 / 71,1 → 69,6 / 69,7 / 69,9 / 70,6 / 71,6 / 69,0 %. El experimento (RF balanceado) reproduce las mismas cifras.
+
+**Grupos:** acierto ponderado agrupado 67,6 % → 68,9 % (por mes 72,1 / 64,5 / 46,6 / 74,0 / 70,6 / 72,8 → 76,4 / 68,5 / 40,3 / 74,0 / 73,1 / 73,7 %); 20 grupos con más ventas 73,4 % → 75,6 %.
+
+**Stock sugerido:** cobertura agrupada 68,4 % → 71,8 % (por mes 63,1 / 65,4 / 74,9 / 69,1 / 64,3 / 73,1 → 74,6 / 71,1 / 76,7 / 70,3 / 65,4 / 72,8 %; 5 de 6 meses en 65-75 %); unidades 71,2 % → 74,4 %; entre los que vendieron 47,3 % → 53,0 %; stock total / real 1,28 → 1,45 (más sobrestock).
+
+**Acierto del monto por producto (producción):** 36,0 % → 36,2 % (1−WAPE 15,2 % → 12,9 %; razón 0,93 → 1,01). Las variantes del experimento no cambian.
+
+**Dashboard (abril, corrida por defecto):** 697 productos con decisión (sin cambio); Reforzar 465 → 445, Mantener 10 → 9, Reducir 222 → 243; 348 por promedio (sin cambio); se venderán 625 → 605 de 1.045; ventas predichas 307.634.392 = 247.013.009 + 60.621.383 → 363.395.700 = 302.774.317 + 60.621.383; tarjeta F1 macro 0,45 (sin cambio), exactitud balanceada 50,4 % → 49,7 %, exactitud 66,8 % → 68,3 %, acierto ¿se venderá? 79,3 % → 79,2 %.
+
+Se regeneraron `tuning_rf_*`, `evaluacion_modelo.txt`, `matriz_confusion.png`, `real_vs_predicho.png`, `comparacion_modelos.*`, `estudio_caso.*`, `estudio_caso_totales.png`, `prediccion_vs_real.xlsx` (copia en `../resultados/`), los experimentos de probabilidad, stock, monto, grupos, mejoras (sin cambios), sensibilidad y elegibilidad (con sus cachés borradas), `entrenar.py` y las cinco capturas `panel_*.png`.
+
+### Limitaciones que este cambio no corrige
+
+- La mezcla, el criterio de sesgo, el clasificador de venta (RF balanceado frente a otros), el nivel de stock y la vista por grupos se adoptaron después de mirar los seis meses del holdout en los experimentos. Los parámetros ya no se eligen con datos de reporte, pero esas decisiones de diseño sí miraron el holdout, así que el estudio de caso de esos componentes no es una prueba ciega. Una evaluación ciega requiere meses posteriores a septiembre de 2026. En la prueba interna (sin holdout) los cuatro clasificadores de venta quedan en 78,3 % a 79,8 %, sin un ganador claro.
+- El clasificador binario y el regresor usan la misma regla (último 20 % por producto) sobre conjuntos de filas distintos, así que el corte puede caer en meses distintos para un mismo producto. Cada selección usa solo el entrenamiento de su propio modelo.
+- En `tune_classifier` la variable `cluster` sale del KMeans ajustado con toda la partición de entrenamiento y no se reajusta por pliegue (no toca la prueba interna).
+- Septiembre del holdout llega al 22 (incompleto).
+
+---
+
 ## [Figuras] Etiquetas de meses y de modelos alineadas con la tesis - 2026-10-14
 
 - `estudio_caso_totales.png`: el eje X dice "Mes 1" ... "Mes 6*" en lugar de Abr ... Sep* (el texto y la Tabla 11 numeran los meses sin fechas). Regenerada desde `prediccion_vs_real.xlsx`.
