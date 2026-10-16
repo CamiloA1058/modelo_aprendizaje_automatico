@@ -63,20 +63,19 @@ DEFAULT_COL_MAP = {
 }
 
 # ── Hiperparámetros del clasificador (RandomForest) ──────────────────────────
-# Valores seleccionados con tune_classifier() (GridSearchCV + TimeSeriesSplit
-# mensual) sobre Query_Result_V5.csv (reconfirmados con Query_Result_V6.csv, sin cambios); ver scripts/tune_rf.py. Re-ajustados
-# con scoring="f1_macro" (ver CHANGELOG 2026-09-23 "métrica macro"): al
-# seleccionar por F1 macro en vez de F1 ponderado, max_depth pasa de None a
-# 14 y min_samples_leaf de 1 a 5 (un modelo algo menos profundo/más regular
-# generaliza mejor en las clases minoritarias Mantener/Reforzar). Reajustados
-# de nuevo tras excluir los ajustes masivos de inventario (ver CHANGELOG
-# 2026-09-23 "Limpieza"): min_samples_leaf pasa de 5 a 3 (n_estimators y
-# max_depth no cambian).
+# Ganador de tune_classifier() (GridSearchCV con scoring="f1_macro" sobre
+# pliegues mensuales TimeSeriesSplit de la partición de ENTRENAMIENTO, ver
+# scripts/tune_rf.py) con Query_Result_V6.csv hasta el 31/03/2026: F1 macro
+# CV 0,4377 +/- 0,0086. Se adopta el ganador de la validación cruzada tal
+# cual: la prueba interna no participa en la elección (antes se conservaba
+# max_depth=14 porque sus métricas de PRUEBA eran parecidas, lo que era
+# seleccionar con la prueba; ver CHANGELOG "V1 sin selección con los datos
+# de prueba").
 ETIQUETA_SIN_RECOMENDACION = "Sin recomendación (estimación por promedio)"
 
 DEFAULT_CLF_PARAMS = {
     "n_estimators": 300,
-    "max_depth": 14,
+    "max_depth": None,
     "min_samples_leaf": 3,
 }
 

@@ -5,9 +5,10 @@ Ajuste de hiperparámetros del clasificador (RandomForest) mediante
 GridSearchCV con validación cruzada temporal por mes (TimeSeriesSplit sobre
 la partición de entrenamiento), ver SalesForecastModel.tune_classifier.
 
-Compara las métricas de validación (holdout de prueba) del clasificador con
-los hiperparámetros por defecto contra los hiperparámetros encontrados por
-la búsqueda en grilla.
+La configuración del clasificador se ELIGE solo con la validación cruzada
+(GridSearchCV, F1 macro): DEFAULT_CLF_PARAMS debe ser el ganador de la CV. Las
+métricas de la prueba interna de "por defecto" y "ajustado" se imprimen solo
+como información; nunca deciden la configuración.
 
 Uso
 ---
@@ -21,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast.paths import DEFAULT_DATASET, REPORTS, ensure_output_dirs  # noqa: E402
 
-from ventas_forecast.model import SalesForecastModel  # noqa: E402
+from ventas_forecast.model import DEFAULT_CLF_PARAMS, SalesForecastModel  # noqa: E402
 
 
 def main():
@@ -64,6 +65,8 @@ def main():
     lineas = []
     lineas.append("AJUSTE DE HIPERPARÁMETROS DEL CLASIFICADOR (RandomForest)")
     lineas.append("=" * 60)
+    adoptado = {k: DEFAULT_CLF_PARAMS[k] for k in sorted(DEFAULT_CLF_PARAMS)}
+    ganador = {k: best_params[k] for k in sorted(best_params)}
     lineas.append(f"Hiperparámetros por defecto: {params_default}")
     lineas.append(f"Mejores hiperparámetros:     {best_params}")
     lineas.append(f"Scoring usado en GridSearchCV: {scoring}")
@@ -71,8 +74,19 @@ def main():
         f"{scoring} en validación cruzada (media ± desv.): "
         f"{mejor_cv_score_mean:.4f} ± {mejor_cv_score_std:.4f}"
     )
+    lineas.append(
+        "Regla de elección: se adopta el ganador de la validación cruzada "
+        "(pliegues mensuales dentro de la partición de entrenamiento); la "
+        "prueba interna no participa."
+    )
+    lineas.append(
+        "DEFAULT_CLF_PARAMS = ganador de la CV: "
+        + ("sí" if adoptado == ganador else
+           f"NO (actualizar DEFAULT_CLF_PARAMS a {ganador})")
+    )
     lineas.append("")
-    lineas.append("Métricas de prueba (holdout) — principales (desbalance de clases)")
+    lineas.append("Métricas de prueba interna (solo informativas, NO deciden la "
+                  "configuración) — principales (desbalance de clases)")
     lineas.append(f"{'Métrica':<20}{'Por defecto':<15}{'Ajustado':<15}")
     for k, etiqueta in (
         ("f1_macro", "F1 macro"),
@@ -82,7 +96,8 @@ def main():
             f"{etiqueta:<20}{metricas_default[k]:<15.4f}{metricas_tuned[k]:<15.4f}"
         )
     lineas.append("")
-    lineas.append("Métricas de prueba (holdout) — ponderadas por soporte (referencia)")
+    lineas.append("Métricas de prueba interna (solo informativas) — ponderadas "
+                  "por soporte (referencia)")
     lineas.append(f"{'Métrica':<20}{'Por defecto':<15}{'Ajustado':<15}")
     for k in ("accuracy", "precision", "recall", "f1"):
         lineas.append(
