@@ -15,15 +15,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import extraer_ventas as ev  # noqa: E402
+import extraer_ventas as ev  # noqa: E402  (agrega src/ a sys.path)
+from ventas_forecast.extraccion import format_row_grupo  # noqa: E402
 
 SQL = Path(__file__).resolve().parent / "grupos_productos.sql"
 CABECERA = ["codigo", "id_grupo", "grupo"]
 
 
-def format_row(row):
-    """(codigo, id_grupo, nombre) -> cadenas; None queda como cadena vacia."""
-    return ["" if v is None else str(v).strip() for v in row]
+# (codigo, id_grupo, nombre) -> cadenas; None queda como cadena vacia.
+format_row = format_row_grupo
 
 
 def write_csv(binary_stream, header, rows):

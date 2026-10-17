@@ -113,7 +113,14 @@ class SalesForecastModel:
 
     Parámetros
     ----------
-    filepath            : ruta al CSV
+    filepath            : ruta al CSV (None si se pasa `datos`)
+    datos               : DataFrame ya leído con el mismo esquema que el CSV
+                          (p. ej. ventas_forecast.fuente_bd.leer_ventas); si
+                          se pasa, load_and_clean() lo usa en lugar de leer
+                          filepath y no lo modifica.
+    grupos_mapa         : Serie codigo -> grupo ya leída (p. ej.
+                          fuente_bd.leer_grupos); si se pasa,
+                          agregar_resumen_grupo() la usa en lugar de grupos_path.
     sep                 : separador (default ';')
     encoding            : codificación (default 'utf-8')
     col_map             : dict {rol: nombre_en_csv} — ver DEFAULT_COL_MAP
@@ -213,8 +220,14 @@ class SalesForecastModel:
         grupos_path=None,
         stock_sugerido=True,
         nivel_servicio=0.70,
+        datos=None,
+        grupos_mapa=None,
     ):
-        self.filepath        = Path(filepath)
+        if filepath is None and datos is None:
+            raise ValueError("Indique filepath (CSV) o datos (DataFrame)")
+        self.filepath        = Path(filepath) if filepath is not None else None
+        self.datos           = datos
+        self.grupos_mapa     = grupos_mapa
         self.sep             = sep
         self.encoding        = encoding
         self.col_map         = {**DEFAULT_COL_MAP, **(col_map or {})}
@@ -311,7 +324,10 @@ class SalesForecastModel:
     # ── 1. CARGA Y LIMPIEZA ───────────────────────────────────────────────────
     def load_and_clean(self):
         c = self._c
-        self.df = pd.read_csv(self.filepath, sep=self.sep, encoding=self.encoding)
+        if self.datos is not None:
+            self.df = self.datos.copy()
+        else:
+            self.df = pd.read_csv(self.filepath, sep=self.sep, encoding=self.encoding)
 
         for role in ("sales", "total_sold", "avg_price"):
             self.df[c(role)] = self._parse_numeric(self.df[c(role)])
@@ -1468,7 +1484,9 @@ class SalesForecastModel:
         if not self.resumen_por_grupo:
             return
         c = self._c
-        if self.grupos_path.exists():
+        if self.grupos_mapa is not None:
+            mapa = self.grupos_mapa
+        elif self.grupos_path.exists():
             mapa = grupos.cargar_mapa(self.grupos_path)
         else:
             print(f"[!] Sin catálogo de grupos ({self.grupos_path}): "
