@@ -1,3 +1,18 @@
+## [Sistema] Lectura directa de la base de datos del taller - 2026-10-17
+
+El dashboard puede generar la predicción leyendo la base Firebird del taller, con los datos que haya hasta ese momento, en lugar de un CSV exportado a mano. La carga de un CSV no cambia. Es para la entrega del software al taller; no forma parte del trabajo de grado.
+
+- **Origen de los datos** en "Ejecutar modelo": "Subir archivo CSV" (como antes) o "Leer de la base de datos". `/api/run` acepta `fuente=bd`; `/api/status` informa `fuente` y `rango`; `/api/bd/estado` dice si la lectura está configurada (sin rutas ni claves).
+- **Misma consulta y formato que la V6.** `src/ventas_forecast/fuente_bd.py` ejecuta `sql/extraccion_ventas_v6.sql` y `sql/grupos_productos.sql`, y arma el DataFrame con el mismo formato del extractor (que pasó a `src/ventas_forecast/extraccion.py`; `sql/extraer_ventas.py` y `sql/extraer_grupos.py` lo importan). `SalesForecastModel` acepta `datos` (DataFrame) y `grupos_mapa` en lugar de archivos.
+- **Equivalencia comprobada contra una copia de la base:** del 01/01/2024 al 31/03/2026 la lectura da las mismas 48.028 filas, valores y tipos que `data/raw/Query_Result_V6.csv` (`assert_frame_equal`; el CSV generado es además idéntico byte a byte), y el mapa de grupos es igual a `data/raw/grupos_productos.csv`.
+- **Ventana.** Últimos 24 meses completos (configurable con `meses`). Si la última venta válida (MAX(FECHA) sobre la misma consulta V6) no es fin de mes, ese mes está incompleto, se excluye y es el mes que se predice. Con la copia (última venta 22/09/2026): 47.336 registros del 01/09/2024 al 31/08/2026, predicción de septiembre de 2026.
+- **Solo lectura.** Transacción SNAPSHOT de solo lectura (TPB `isc_tpb_read`), verificada con `is_read_only()` antes de leer; cada sentencia se valida como un único `SELECT`; siempre *rollback*, nunca *commit*.
+- **Credenciales solo por configuración:** variables `FIREBIRD_*` o `config/base_datos.ini` (ignorado por git; plantilla `config/base_datos.ejemplo.ini`). Los mensajes de error dicen qué revisar sin incluir claves, rutas ni el texto del motor; el registro no muestra datos de clientes.
+- **Dependencia:** `firebird-driver==2.0.3` en `requirements.txt`; `Iniciar_Dashboard.bat` verifica también `firebird.driver` y lo instala si falta. Sin el paquete, la lectura de la base dice cómo instalarlo.
+- **Prueba de humo** (puerto distinto de 5000, contra la copia): 804 productos con decisión (382 Reforzar / 20 Mantener / 402 Reducir) y 264 por promedio (1.068 con predicción), ventas estimadas de septiembre 308,9 M (ventas de agosto de esos productos 389,2 M), 81 grupos. Son datos de prueba de una copia, no cifras de la tesis.
+- **Pruebas:** `tests/test_fuente_bd.py` (ventana, prioridad de la configuración, solo SELECT, transacción de solo lectura, esquema igual al CSV, errores sin secretos, modelo con datos en memoria; 3 de integración que se omiten sin `FIREBIRD_DB_PRUEBA` y `FIREBIRD_CLIENT_PRUEBA`) y `tests/test_dashboard_fuente_bd.py` (API con el lector simulado).
+- **Documentación:** README ("Leer directamente de la base de datos") y `docs/CONFIGURAR_BASE_DE_DATOS.md` para el técnico del taller.
+
 ## [Validación] V1: ninguna selección con los datos de prueba - 2026-10-16
 
 Un revisor académico señaló que el procedimiento de validación y entrenamiento "requiere verificación". Principio adoptado: **nada de lo que se reporta como resultado se elige, ajusta o selecciona con los mismos datos sobre los que se reporta** (pesos, hiperparámetros, umbrales, cuantiles, elección de modelo).

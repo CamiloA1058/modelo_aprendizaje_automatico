@@ -28,7 +28,7 @@ if errorlevel 1 (
 )
 
 :: -- Verificar dependencias importandolas en el mismo Python ------------
-"%PY%" -c "import flask, flask_cors, pandas, numpy, sklearn, matplotlib" >nul 2>&1
+"%PY%" -c "import flask, flask_cors, pandas, numpy, sklearn, matplotlib, firebird.driver" >nul 2>&1
 if errorlevel 1 (
     echo  Instalando dependencias, esto puede tardar unos minutos...
     echo.

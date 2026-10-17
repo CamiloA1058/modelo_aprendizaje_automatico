@@ -341,6 +341,13 @@ class ErroresSinSecretosTest(unittest.TestCase):
                 fb.leer_grupos(self.cfg)
         self.assertIn("fbclient.dll", str(ctx.exception))
 
+    def test_falta_el_paquete_firebird_driver(self):
+        with mock.patch.dict(sys.modules, {"firebird.driver": None}):
+            with self.assertRaises(fb.ErrorBaseDatos) as ctx:
+                fb.leer_grupos(self.cfg)
+        self.assertIn("firebird-driver", str(ctx.exception))
+        self.assertIn("requirements.txt", str(ctx.exception))
+
     def test_archivos_inexistentes(self):
         with self.assertRaises(fb.ErrorConfiguracionBD) as ctx:
             fb.leer_grupos(_config(cliente=self.cfg.cliente))

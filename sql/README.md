@@ -7,7 +7,7 @@ Consultas contra la base de datos Firebird del sistema de inventario
 |---------|-----------|
 | `extraccion_ventas_v6.sql` | Consulta vigente. Igual que la V5 pero solo facturas de venta (tipos 1 y 13) no anuladas y sin servicios (mano de obra y fletes, lista explícita de códigos de producto). Genera `data/raw/Query_Result_V6.csv`. |
 | `grupos_productos.sql`, `extraer_grupos.py` | Catálogo producto → grupo (`PRODUCTO.IDGRUPO` con el nombre de `GRUPO.DESCRIPCION`), solo datos de catálogo. Genera `data/raw/grupos_productos.csv` (`codigo;id_grupo;grupo`): `python sql/extraer_grupos.py --db copia.fdb --out data/raw/grupos_productos.csv` (mismas variables `FIREBIRD_*` que el extractor de ventas). |
-| `extraer_ventas.py` | Extractor offline: ejecuta un `.sql` sobre una copia de la base Firebird y escribe el CSV en el formato exacto de la V5 (`--db --sql --out --desde --hasta`). |
+| `extraer_ventas.py` | Extractor offline: ejecuta un `.sql` sobre una copia de la base Firebird y escribe el CSV en el formato exacto de la V5 (`--db --sql --out --desde --hasta`). El formato vive en `src/ventas_forecast/extraccion.py`, compartido con la lectura directa de la base desde el dashboard (`src/ventas_forecast/fuente_bd.py`, ver el README principal). |
 | `extraccion_ventas_v5.sql` | Consulta anterior (sin filtro de tipo de documento). Genera `data/historico/Query_Result_V5.csv`. |
 | `consultas_versiones_anteriores.sql` | Consultas de V1, V2 y V4, más consultas exploratorias. |
 | `exploracion/explorar_bd.py`, `explorar_bd_v2.py` | Scripts que ejecutan consultas de exploración y exportan CSV. Las credenciales se leen de variables de entorno. |

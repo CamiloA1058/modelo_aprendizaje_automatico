@@ -30,6 +30,7 @@ odd/
 # Credenciales y exploracion local de la base de datos
 sql/exploracion/.env
 scripts_db/
+config/base_datos.ini
 
 # Bases de datos reales del taller (no versionar)
 data/test_db/

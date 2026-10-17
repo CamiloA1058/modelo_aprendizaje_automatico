@@ -151,7 +151,7 @@ Los resultados se guardan en `outputs/` (gitignored):
 
 ## Dashboard
 
-Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen general (KPIs, historial, distribución de decisiones, top de productos), vista por grupo de producto, catálogo de predicciones con búsqueda, filtros y descarga del CSV, detalle por producto y ejecución del modelo con subida de CSV y parámetros.
+Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen general (KPIs, historial, distribución de decisiones, top de productos), vista por grupo de producto, catálogo de predicciones con búsqueda, filtros y descarga del CSV, detalle por producto y ejecución del modelo con subida de CSV o lectura directa de la base de datos del taller (ver [Leer directamente de la base de datos](#leer-directamente-de-la-base-de-datos)) y parámetros.
 
 **Predicción combinada.** El monto predicho por producto (`ventas_predichas`) es `w x RF + (1 - w) x media_3`, donde `media_3` es el promedio de los últimos 3 meses del producto y `w` (0, 0,1 ... 1) se elige con la validación interna dentro del entrenamiento (un regresor temporal ajustado con los primeros meses de entrenamiento de cada producto predice sus últimos meses de entrenamiento), minimizando |suma predicha - suma real|; la prueba interna solo reporta. El RF puro se conserva en `ventas_predichas_rf`. El KPI "Ventas predichas" muestra la suma de la mezcla (con `w` en porcentaje), el detalle del producto agrega "Solo modelo: $..." y el CSV descargable trae ambas columnas. En la última corrida real `w` = 0,0 (en la validación interna el RF predice el 23,6 % de la suma real y la media de 3 meses el 94,8 %), así que el monto combinado de abril es la media de 3 meses; en la prueba interna la razón suma predicha/real es 0,59 (RF) y 1,29 (mezcla) (ver `outputs/reports/evaluacion_modelo.txt` y la entrada "[Validación] V1" de `docs/CHANGELOG.md`).
 
@@ -168,8 +168,9 @@ Navegador (dashboard/dashboard.html)
         │  HTTP / JSON
         ▼
   dashboard/app.py (Flask, puerto 5000)
-        ├── GET  /api/status        Estado del pipeline + mes predicho
-        ├── POST /api/run           Lanza el modelo en un hilo secundario
+        ├── GET  /api/status        Estado del pipeline + mes predicho + fuente (csv/bd) y rango leído
+        ├── POST /api/run           Lanza el modelo en un hilo secundario (fuente=csv | bd)
+        ├── GET  /api/bd/estado     ¿Está configurada la lectura de la base? (sin rutas ni claves)
         ├── GET  /api/summary       KPIs, pred_total (modelo + promedio), pred_total_modelo, pred_total_promedio, n_promedio, n_se_vendera, sale_threshold, pred_total_rf, blend_weight, historial, métricas, top productos
         ├── GET  /api/products      Lista paginada con filtros (incluye grupo) y orden
         ├── GET  /api/grupos        Suma de predicciones por grupo de producto
@@ -178,6 +179,42 @@ Navegador (dashboard/dashboard.html)
               ▼
   SalesForecastModel (src/ventas_forecast/model.py)
 ```
+
+## Leer directamente de la base de datos
+
+En **Ejecutar modelo → Origen de los datos** se elige entre **Subir archivo CSV** (como siempre) y **Leer de la base de datos**. Con la base, el dashboard lee las ventas con la misma consulta V6 del CSV (`sql/extraccion_ventas_v6.sql`: facturas de venta tipos 1 y 13 no anuladas, sin servicios) y el catálogo de grupos, y corre el mismo pipeline. Con el mismo rango de fechas el resultado es idéntico al CSV: contra una copia de la base, 2024-01-01 a 2026-03-31 da las mismas 48.028 filas, valores y tipos que `data/raw/Query_Result_V6.csv`.
+
+**Qué configurar.** Copiar `config/base_datos.ejemplo.ini` como `config/base_datos.ini` (git lo ignora) y completar la sección `[firebird]`, o definir las variables de entorno, que tienen prioridad:
+
+| Clave del archivo | Variable de entorno | Contenido |
+|---|---|---|
+| `base_datos` | `FIREBIRD_DB` | Ruta del `.fdb` (en este equipo, o en el servidor si hay `host`) — obligatoria |
+| `host` | `FIREBIRD_HOST` | Vacío: se abre el archivo en este equipo. Con servidor Firebird: nombre o IP del servidor |
+| `usuario` | `FIREBIRD_USER` | Usuario de Firebird (por defecto `SYSDBA`) |
+| `clave` | `FIREBIRD_PASSWORD` | Clave del usuario |
+| `cliente` | `FIREBIRD_CLIENT` | Ruta de `fbclient.dll` — obligatoria |
+| `meses` | `FIREBIRD_MESES` | Meses completos que se leen (por defecto 24) |
+
+**De dónde sale `fbclient.dll`.** Del Firebird instalado en el taller (servidor o cliente), por ejemplo `C:\Program Files\Firebird\Firebird_5_0\fbclient.dll`. El paquete de Python `firebird-driver` (en `requirements.txt`) necesita un cliente de Firebird 3 o posterior; un cliente nuevo puede conectarse por red a un servidor más antiguo.
+
+**Solo lectura.** Cada lectura abre una transacción SNAPSHOT de solo lectura (el motor rechaza cualquier escritura y el sistema verifica que la transacción quedó en ese modo antes de leer), cada sentencia se valida como un único `SELECT` y la transacción termina con *rollback*. Las claves no aparecen en el registro, en las respuestas de la API ni en la interfaz.
+
+**Qué meses se leen.** Se toma la fecha de la última venta válida. Si no es el último día de su mes, ese mes está incompleto y no se usa: se leen los `meses` meses completos anteriores y se predice justamente ese mes. Ejemplo: última venta 22/09/2026 → se leen del 01/09/2024 al 31/08/2026 y se predice septiembre de 2026. Si la última venta es el último día del mes, ese mes entra y se predice el siguiente. El registro de ejecución muestra los registros y el rango leídos, y la pantalla el rango y el mes predicho.
+
+**Problemas frecuentes.**
+
+| Mensaje | Qué revisar |
+|---|---|
+| "la lectura de la base de datos no está configurada: falta …" | Que exista `config/base_datos.ini` con `base_datos` y `cliente` (o las variables `FIREBIRD_*`) |
+| "no se encontró el cliente de Firebird (fbclient.dll)" / "no se pudo cargar el cliente" | La ruta `cliente`, y que el `fbclient.dll` sea de 64 bits como Python y de Firebird 3 o posterior |
+| "no se encontró el archivo de la base de datos" | La ruta `base_datos` (sin `host` debe existir en este equipo) |
+| "no se pudo conectar a la base de datos" | Usuario y clave; si el servidor Firebird tiene la base abierta, configurar `host = localhost` (o la IP del servidor) para conectarse a través de él |
+| "no se pudo leer la base de datos" | Que sea la base de ventas del taller y que el usuario tenga permiso de lectura |
+| "falta el paquete firebird-driver" | Ejecutar `python -m pip install -r requirements.txt` (o reiniciar `Iniciar_Dashboard.bat`, que lo instala) |
+
+En todos los casos la opción **Subir archivo CSV** sigue funcionando. Guía paso a paso para el técnico del taller: [docs/CONFIGURAR_BASE_DE_DATOS.md](docs/CONFIGURAR_BASE_DE_DATOS.md).
+
+Pruebas: `tests/test_fuente_bd.py` y `tests/test_dashboard_fuente_bd.py` usan una conexión simulada. La prueba de integración contra una **copia** de la base se activa con `FIREBIRD_DB_PRUEBA` (ruta de la copia) y `FIREBIRD_CLIENT_PRUEBA` (ruta de `fbclient.dll`); sin ellas se omite.
 
 ## Uso programático del modelo
 
@@ -212,6 +249,7 @@ Ver [data/historico/README.md](data/historico/README.md) para el linaje V1 a V5 
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) — Historial de decisiones y resultados (incluye la tabla de rutas antiguas y nuevas de la reestructuración)
 - [docs/BITACORA.md](docs/BITACORA.md) — Bitácora histórica de desarrollo
 - [sql/README.md](sql/README.md) — Extracción de datos
+- [docs/CONFIGURAR_BASE_DE_DATOS.md](docs/CONFIGURAR_BASE_DE_DATOS.md) — Configurar la lectura directa de la base de datos en el taller
 
 ## Dependencias
 

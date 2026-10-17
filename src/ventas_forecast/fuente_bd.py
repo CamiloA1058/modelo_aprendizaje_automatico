@@ -184,25 +184,33 @@ def consulta_grupos():
 
 
 # ── Conexión de solo lectura ─────────────────────────────────────────────────
+def _driver():
+    """Paquete firebird-driver; si falta, un mensaje que dice cómo instalarlo."""
+    try:
+        import firebird.driver as driver
+    except ImportError:
+        raise ErrorBaseDatos(
+            "falta el paquete firebird-driver: instálelo con "
+            "'python -m pip install -r requirements.txt'") from None
+    return driver
+
+
 def tpb_solo_lectura():
     """TPB de la transacción: versión 3, READ (solo lectura), SNAPSHOT
     (concurrency) y WAIT. Son los mismos bytes que
     firebird.driver.tpb(Isolation.SNAPSHOT, access_mode=TraAccessMode.READ),
     pero sin cargar fbclient para construirlos."""
-    from firebird.driver import Isolation, TraAccessMode
-    from firebird.driver.types import TraLockResolution
-
-    return bytes([3, TraAccessMode.READ, Isolation.SNAPSHOT, TraLockResolution.WAIT])
+    d = _driver()
+    return bytes([3, d.TraAccessMode.READ, d.Isolation.SNAPSHOT, d.types.TraLockResolution.WAIT])
 
 
 def _conectar_driver(config):
-    from firebird.driver import connect, driver_config
-
-    driver_config.fb_client_library.value = config.cliente
+    driver = _driver()
+    driver.driver_config.fb_client_library.value = config.cliente
     kwargs = {"user": config.usuario, "charset": extraccion.CHARSET}
     if config.clave:
         kwargs["password"] = config.clave
-    return connect(config.dsn, **kwargs)
+    return driver.connect(config.dsn, **kwargs)
 
 
 def _abrir_conexion(config):
@@ -212,6 +220,7 @@ def _abrir_conexion(config):
     if not config.host and not os.path.isfile(config.base_datos):
         raise ErrorConfiguracionBD(
             f"no se encontró el archivo de la base de datos indicado en {_DONDE}")
+    _driver()
     try:
         return _conectar_driver(config)
     except OSError:
@@ -232,12 +241,11 @@ class _SesionLectura:
         self.config = config
 
     def __enter__(self):
-        from firebird.driver import DefaultAction
-
+        default_action = _driver().DefaultAction.ROLLBACK
         self._con = _abrir_conexion(self.config)
         try:
             self._tm = self._con.transaction_manager(
-                default_tpb=tpb_solo_lectura(), default_action=DefaultAction.ROLLBACK)
+                default_tpb=tpb_solo_lectura(), default_action=default_action)
             self._tm.begin()
             solo_lectura = self._tm.info.is_read_only()
         except Exception:
