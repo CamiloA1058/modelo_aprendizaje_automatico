@@ -28,6 +28,7 @@ DEFAULT_OUTPUT = DEFAULT_PREDICTION
 # ── Importar modelo ───────────────────────────────────────────────────────────
 from ventas_forecast.model import SalesForecastModel, ETIQUETA_SIN_RECOMENDACION
 from ventas_forecast import grupos as grupos_mod
+from ventas_forecast import fuente_bd
 from ventas_forecast.figuras import fmt_es, pct_es
 
 app = Flask(__name__)
@@ -40,7 +41,11 @@ _state = {
     "model":   None,
     "error":   None,
     "mes_predicho": None,
+    "fuente":  "csv",   # "csv" | "bd"
+    "rango":   None,    # {"desde", "hasta"} dd/mm/aaaa de los datos leídos de la base
 }
+
+ALTERNATIVA_CSV = "Puede seguir usando la opción «Subir archivo CSV»."
 
 
 def _es_promedio(df):
@@ -69,21 +74,60 @@ def _msg_umbral(umbral, exactitud_prueba):
             f"exactitud en la prueba interna {pct_es(exactitud_prueba)}")
 
 
+def _msg_lectura_bd(n_registros, ventana):
+    return (f"  → Leyendo la base de datos… {fmt_es(n_registros)} registros "
+            f"del {ventana.desde:%d/%m/%Y} al {ventana.hasta:%d/%m/%Y}")
+
+
+def _msg_ultima_venta(fecha_max, ventana):
+    """La última venta y si su mes quedó fuera por estar incompleto."""
+    if fecha_max is None:
+        return None
+    if fecha_max > ventana.hasta:
+        return (f"  → Última venta: {fecha_max:%d/%m/%Y} (su mes está incompleto y no "
+                f"se usa: es el mes que se predice)")
+    return f"  → Última venta: {fecha_max:%d/%m/%Y}"
+
+
+def _leer_base(config_bd):
+    """Ventas y grupos de la base (solo lectura) para el pipeline."""
+    _log("✔ Leyendo la base de datos…")
+    datos = fuente_bd.leer_ventas(config_bd)
+    ventana = datos.attrs["ventana"]
+    _log(_msg_lectura_bd(len(datos), ventana))
+    ultima = _msg_ultima_venta(datos.attrs.get("fecha_max"), ventana)
+    if ultima:
+        _log(ultima)
+    mapa = fuente_bd.leer_grupos(config_bd)
+    _state["rango"] = {"desde": f"{ventana.desde:%d/%m/%Y}",
+                       "hasta": f"{ventana.hasta:%d/%m/%Y}"}
+    return datos, mapa
+
+
 def _log(msg):
     _state["log"].append(msg)
     print(msg)
 
 
-def _run_model(filepath, col_map, params):
+def _run_model(filepath, col_map, params, config_bd=None):
+    """config_bd (fuente_bd.ConfigBD): lee los datos de la base en lugar del CSV."""
     try:
         _state["status"] = "running"
         _state["log"]    = []
         _state["error"]  = None
+        _state["fuente"] = "bd" if config_bd is not None else "csv"
+        _state["rango"]  = None
 
         _log("▶ Iniciando pipeline de predicción…")
 
+        origen = {}
+        if config_bd is not None:
+            datos, mapa = _leer_base(config_bd)
+            origen = {"datos": datos, "grupos_mapa": mapa}
+
         model = SalesForecastModel(
             filepath=filepath,
+            **origen,
             output_path=DEFAULT_OUTPUT,
             col_map=col_map or None,
             n_clusters=int(params.get("n_clusters", 3)),
@@ -155,6 +199,11 @@ def _run_model(filepath, col_map, params):
         _state["status"]       = "done"
         _log(f"✅ Pipeline completado — {fmt_es(len(model.results))} productos con predicción.")
 
+    except fuente_bd.ErrorBaseDatos as exc:
+        # Mensaje apto para el usuario (sin claves ni rutas); sin traza.
+        _state["status"] = "error"
+        _state["error"]  = str(exc)
+        _log(f"❌ Error: {exc}. {ALTERNATIVA_CSV}")
     except Exception as exc:
         _state["status"] = "error"
         _state["error"]  = traceback.format_exc()
@@ -170,7 +219,20 @@ def api_status():
         "log":          _state["log"][-60:],
         "error":        _state["error"],
         "mes_predicho": _state["mes_predicho"],
+        "fuente":       _state["fuente"],
+        "rango":        _state["rango"],
     })
+
+
+@app.route("/api/bd/estado")
+def api_bd_estado():
+    """¿Está configurada la lectura de la base? No se conecta ni devuelve rutas
+    ni credenciales."""
+    try:
+        config = fuente_bd.cargar_config()
+    except fuente_bd.ErrorConfiguracionBD as exc:
+        return jsonify({"configurada": False, "msg": f"{exc}. {ALTERNATIVA_CSV}"})
+    return jsonify({"configurada": True, "meses": config.meses})
 
 
 STOCK_COLS = ("stock_sugerido", "stock_sugerido_unidades")
@@ -196,7 +258,16 @@ def api_run():
     if _state["status"] == "running":
         return jsonify({"ok": False, "msg": "El modelo ya está en ejecución."}), 409
 
-    if "file" in request.files:
+    fuente = request.form.get("fuente", "csv")
+    config_bd = None
+    if fuente == "bd":
+        try:
+            config_bd = fuente_bd.cargar_config()
+        except fuente_bd.ErrorConfiguracionBD as exc:
+            return jsonify({"ok": False, "msg": f"No se puede leer la base de datos: {exc}. "
+                                                f"{ALTERNATIVA_CSV}"}), 400
+        filepath = None
+    elif "file" in request.files:
         f = request.files["file"]
         upload_dir = UPLOADS
         upload_dir.mkdir(parents=True, exist_ok=True)
@@ -206,11 +277,13 @@ def api_run():
         filepath = DEFAULT_DATA
 
     params      = request.form.to_dict()
+    params.pop("fuente", None)
     col_map_raw = params.pop("col_map", None)
     col_map     = json.loads(col_map_raw) if col_map_raw else None
 
     threading.Thread(
-        target=_run_model, args=(filepath, col_map, params), daemon=True
+        target=_run_model, args=(filepath, col_map, params),
+        kwargs={"config_bd": config_bd}, daemon=True
     ).start()
 
     return jsonify({"ok": True, "msg": "Pipeline iniciado."})

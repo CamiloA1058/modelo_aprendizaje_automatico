@@ -110,6 +110,10 @@
   .drop-zone { border: 2px dashed var(--border-md); border-radius: var(--radius); padding: 36px 24px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; }
   .drop-zone:hover, .drop-zone.drag { border-color: var(--accent); background: var(--accent-bg); }
   .drop-zone svg { width: 32px; height: 32px; color: var(--muted); margin-bottom: 10px; }
+  .fuente-opciones { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .btn.sel { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+  .bd-info { border: 1px solid var(--border-md); border-radius: var(--radius); padding: 18px 20px; font-size: 13px; }
+  .bd-info p + p { margin-top: 8px; }
   #file-input { display: none; }
 
   /* LOG */
@@ -426,12 +430,17 @@
   <div class="page" id="page-ejecutar">
     <div class="page-header">
       <h1>Ejecutar modelo</h1>
-      <p>Sube un archivo CSV o usa el dataset configurado en el servidor</p>
+      <p>Sube un archivo CSV, lee la base de datos del taller o usa el dataset configurado en el servidor</p>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:20px;">
       <div class="card">
-        <div class="section-title" style="margin-bottom:12px;">Archivo de datos</div>
+        <div class="section-title" style="margin-bottom:12px;">Origen de los datos</div>
+        <div class="fuente-opciones" role="radiogroup" aria-label="Origen de los datos">
+          <button type="button" class="btn sel" id="fuente-btn-csv" role="radio" aria-checked="true" onclick="setFuente('csv')">Subir archivo CSV</button>
+          <button type="button" class="btn" id="fuente-btn-bd" role="radio" aria-checked="false" onclick="setFuente('bd')">Leer de la base de datos</button>
+        </div>
+        <div id="fuente-csv">
         <div class="drop-zone" id="drop-zone"
              onclick="document.getElementById('file-input').click()"
              ondragover="event.preventDefault()"
@@ -444,6 +453,14 @@
         </div>
         <input type="file" id="file-input" accept=".csv" onchange="handleFile(this.files[0])">
         <p style="font-size:11px;color:var(--muted);margin-top:10px;">Si no subes archivo se usa el dataset del servidor.</p>
+        </div>
+        <div id="fuente-bd" style="display:none;">
+          <div class="bd-info">
+            <p>Se leen las ventas de la base de datos del taller <strong>solo para consulta</strong>: no se modifica nada.</p>
+            <p style="color:var(--muted);">Se usan los últimos <span id="bd-meses">24</span> meses completos. Si el mes en curso está incompleto no se usa: es el mes que se predice.</p>
+            <p id="bd-estado" style="font-size:12px;"></p>
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -591,6 +608,30 @@ async function apiGet(url) {
 }
 
 // ── Ejecutar modelo ──────────────────────────────────────────────────────────
+let _fuente = 'csv';
+async function setFuente(f) {
+  _fuente = f;
+  ['csv', 'bd'].forEach(k => {
+    const b = document.getElementById('fuente-btn-' + k);
+    b.classList.toggle('sel', k === f);
+    b.setAttribute('aria-checked', k === f ? 'true' : 'false');
+    document.getElementById('fuente-' + k).style.display = k === f ? 'block' : 'none';
+  });
+  if (f !== 'bd') return;
+  const el = document.getElementById('bd-estado');
+  el.textContent = 'Verificando la configuración…';
+  el.style.color = 'var(--muted)';
+  const d = await apiGet('/api/bd/estado');
+  if (d.configurada) {
+    document.getElementById('bd-meses').textContent = d.meses;
+    el.textContent = '✔ Base de datos configurada.';
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = d.msg || 'No se pudo verificar la configuración de la base de datos.';
+    el.style.color = 'var(--red)';
+  }
+}
+
 function handleFile(f) {
   if (!f) return;
   _selectedFile = f;
@@ -612,7 +653,8 @@ async function runModel() {
   document.getElementById('run-status').textContent = '';
 
   const fd = new FormData();
-  if (_selectedFile) fd.append('file', _selectedFile);
+  fd.append('fuente', _fuente);
+  if (_fuente === 'csv' && _selectedFile) fd.append('file', _selectedFile);
 
   const growth = parseFloat(document.getElementById('param-growth').value) / 100;
   const reduce = parseFloat(document.getElementById('param-reduce').value) / 100;
@@ -651,7 +693,9 @@ async function pollStatus() {
     clearInterval(_polling);
     document.getElementById('progress-fill').style.width = '100%';
     document.getElementById('run-btn').disabled = false;
-    document.getElementById('run-status').textContent = '✅ Completado';
+    document.getElementById('run-status').textContent = d.rango
+      ? `✅ Completado — datos del ${d.rango.desde} al ${d.rango.hasta} · mes predicho ${d.mes_predicho}`
+      : '✅ Completado';
     setSidebarStatus('done', d.mes_predicho);
     setTimeout(() => {
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
