@@ -152,9 +152,20 @@
   .legend-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
   .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 
+  /* ESTADO DE PRODUCTOS */
+  .estado-card { cursor: pointer; transition: box-shadow .15s, background .15s; }
+  .estado-card:hover { background: var(--bg); }
+  .estado-card.sel { box-shadow: 0 0 0 2px var(--accent); }
+  .estado-card .kpi-label { min-height: 28px; line-height: 1.3; }
+  .estado-expl { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+  #page-estados td, #page-estados th { padding-left: 8px; padding-right: 8px; }
+  #page-estados .desc { max-width: 180px; }
+  #page-estados tbody tr.sin-detalle:hover td { cursor: default; }
+
   @media (max-width: 860px) {
     .sidebar { display: none; }
     .kpi-grid { grid-template-columns: 1fr 1fr !important; }
+    .estado-grid { grid-template-columns: 1fr !important; }
     .chart-row { grid-template-columns: 1fr; }
   }
 </style>
@@ -183,6 +194,10 @@
   <button class="nav-item" id="nav-grupos" onclick="nav(this,'grupos')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/><circle cx="6" cy="7" r="0.6"/><circle cx="6" cy="12" r="0.6"/><circle cx="6" cy="17" r="0.6"/></svg>
     Grupos
+  </button>
+  <button class="nav-item" id="nav-estados" onclick="nav(this,'estados')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+    Todos los productos
   </button>
 
   <div class="nav-section">Configuración</div>
@@ -356,6 +371,63 @@
             <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ESTADO DE TODOS LOS PRODUCTOS -->
+  <div class="page" id="page-estados">
+    <div class="page-header">
+      <h1>Estado de todos los productos</h1>
+      <p>Qué pasa con cada producto vendido, tenga o no predicción. Haz clic en un estado para ver sus productos.</p>
+    </div>
+
+    <div id="estados-empty" class="empty">
+      <p>Ejecuta el modelo para ver el estado de los productos.</p>
+    </div>
+
+    <div id="estados-content" style="display:none">
+      <div class="card" id="estados-nota" style="margin-bottom:16px;font-size:13px;line-height:1.5;"></div>
+
+      <div class="kpi-grid estado-grid" id="estados-cards" style="grid-template-columns:repeat(5,1fr)"></div>
+
+      <div class="toolbar">
+        <input type="text" id="estados-search" placeholder="Buscar por código o nombre…" oninput="filtrarEstados()">
+        <select id="estados-filtro" onchange="filtrarEstados()">
+          <option value="">Todos los estados</option>
+        </select>
+        <select id="estados-sort" onchange="filtrarEstados()">
+          <option value="ventas_12m">Ordenar: ventas últimos 12 meses</option>
+          <option value="meses_sin_venta">Ordenar: meses sin vender</option>
+          <option value="codigo">Ordenar: código</option>
+        </select>
+        <button class="btn" onclick="window.location='/api/estados/descargar'">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Descargar CSV
+        </button>
+        <span id="estados-count" style="margin-left:auto;font-size:12px;color:var(--muted);"></span>
+      </div>
+
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Código</th><th>Descripción</th><th>Grupo</th><th>Estado</th>
+              <th title="Meses en los que el producto tuvo alguna venta">Meses con venta</th>
+              <th>Última venta</th>
+              <th>Ventas <small style="font-size:9px;font-weight:400">últimos 12 meses</small></th>
+              <th title="Recomendación y monto estimado de los productos con predicción">Predicción <small id="th-estados-mes" style="font-size:9px;font-weight:400"></small></th>
+            </tr></thead>
+            <tbody id="estados-body">
+              <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;">
+          <button class="btn" id="estados-prev" onclick="paginaEstados(-1)">← Anterior</button>
+          <span id="estados-page-info" style="font-size:12px;color:var(--muted);flex:1;text-align:center;"></span>
+          <button class="btn" id="estados-next" onclick="paginaEstados(1)">Siguiente →</button>
+        </div>
       </div>
     </div>
   </div>
@@ -547,6 +619,7 @@ function nav(btn, id) {
   if (id === 'resumen')   loadSummary();
   if (id === 'productos') { _page = 1; if (!_irAProductosDeGrupo) _grupo = ''; _irAProductosDeGrupo = false; actualizarChipGrupo(); loadProducts(); }
   if (id === 'grupos')    loadGrupos();
+  if (id === 'estados')   { _estPage = 1; loadEstados(); }
 }
 
 // ── Grupos ───────────────────────────────────────────────────────────────────
@@ -998,6 +1071,153 @@ async function loadProducts() {
   }).join('');
 }
 
+// ── Estado de todos los productos ────────────────────────────────────────────
+// Solo el color de cada estado vive aquí; nombres y explicaciones vienen de la API.
+const ESTADO_COLOR = {
+  recomendacion_monto: 'green', solo_recomendacion: 'blue', monto_promedio: 'amber',
+  venta_ocasional: 'gray', sin_ventas_recientes: 'red',
+};
+const MESES_CORTOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+let _estPage = 1, _estado = '', _estNombres = {};
+
+function esc(t) {
+  return String(t ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function mesCorto(aaaamm) {
+  if (!aaaamm) return '—';
+  const [a, m] = aaaamm.split('-');
+  return `${MESES_CORTOS[Number(m) - 1]} ${a}`;
+}
+
+function haceMeses(n) {
+  if (n == null) return '';
+  if (n === 0) return 'el último mes';
+  return n === 1 ? 'hace 1 mes' : `hace ${nEs(n)} meses`;
+}
+
+// Participación con un decimal; una parte positiva pero mínima no se muestra como 0,0 %.
+function pcParte(f) {
+  const v = (f || 0) * 100;
+  return v > 0 && v < 0.05 ? 'menos de ' + pc(0.1, 1) : pc(v, 1);
+}
+
+function prediccionHtml(r) {
+  if (!r.decision && r.ventas_predichas == null) return '<span style="color:var(--muted)">—</span>';
+  const monto = r.ventas_predichas != null
+    ? `<div style="font-size:11px;margin-top:3px">${COP(r.ventas_predichas)}</div>`
+    : '<div style="font-size:10px;color:var(--muted);margin-top:3px">sin monto</div>';
+  return (r.decision ? decisionBadge(r.decision) : '') + monto;
+}
+
+function estadoBadge(clave) {
+  const color = ESTADO_COLOR[clave] || 'gray';
+  return `<span class="badge ${color}">${esc(_estNombres[clave] || clave)}</span>`;
+}
+
+function marcarTarjetaEstado() {
+  document.querySelectorAll('#estados-cards .estado-card').forEach(c =>
+    c.classList.toggle('sel', _estado !== '' && c.dataset.estado === _estado));
+}
+
+async function loadEstados() {
+  const d = await apiGet('/api/estados');
+  if (!d.ok) {
+    document.getElementById('estados-empty').style.display = 'block';
+    document.getElementById('estados-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('estados-empty').style.display = 'none';
+  document.getElementById('estados-content').style.display = 'block';
+  if (d.mes_predicho) document.getElementById('th-estados-mes').textContent = d.mes_predicho;
+
+  document.getElementById('estados-nota').innerHTML =
+    `De los <strong>${fmt(d.total_productos)}</strong> productos vendidos en los últimos dos años, ` +
+    `<strong>${fmt(d.con_prediccion)}</strong> tienen predicción este mes` +
+    (d.mes_predicho ? ` (${esc(d.mes_predicho)})` : '') + '. ' +
+    'Los demás se venden muy de vez en cuando o dejaron de venderse; abajo puede ver cuáles son.';
+
+  _estNombres = {};
+  d.estados.forEach(e => { _estNombres[e.clave] = e.nombre; });
+
+  const sel = document.getElementById('estados-filtro');
+  sel.innerHTML = '<option value="">Todos los estados</option>' +
+    d.estados.map(e => `<option value="${esc(e.clave)}">${esc(e.nombre)}</option>`).join('');
+  sel.value = _estado;
+
+  const borde = { green: 'green', blue: 'blue', amber: 'amber', red: 'red', gray: '' };
+  document.getElementById('estados-cards').innerHTML = d.estados.map(e => `
+    <div class="kpi estado-card ${borde[ESTADO_COLOR[e.clave]] || ''}" data-estado="${esc(e.clave)}"
+         onclick="elegirEstado(this.dataset.estado)" title="Ver los productos en este estado">
+      <div class="kpi-label">${esc(e.nombre)}</div>
+      <div class="kpi-value">${fmt(e.productos)}</div>
+      <div class="kpi-sub">${pcParte(e.pct_productos)} de los productos</div>
+      <div class="kpi-sub">${pcParte(e.pct_ventas_12m)} de las ventas de 12 meses</div>
+      <div class="estado-expl">${esc(e.explicacion)}</div>
+    </div>`).join('');
+  marcarTarjetaEstado();
+
+  loadEstadosProductos();
+}
+
+function elegirEstado(clave) {
+  _estado = _estado === clave ? '' : clave;
+  document.getElementById('estados-filtro').value = _estado;
+  marcarTarjetaEstado();
+  _estPage = 1;
+  loadEstadosProductos();
+}
+
+function filtrarEstados() {
+  _estado = document.getElementById('estados-filtro').value;
+  marcarTarjetaEstado();
+  _estPage = 1;
+  loadEstadosProductos();
+}
+
+function paginaEstados(dir) {
+  _estPage = Math.max(1, _estPage + dir);
+  loadEstadosProductos();
+}
+
+async function loadEstadosProductos() {
+  const params = new URLSearchParams({
+    q: document.getElementById('estados-search').value,
+    estado: _estado,
+    sort: document.getElementById('estados-sort').value,
+    page: _estPage, size: 50,
+  });
+  const d = await apiGet('/api/estados/productos?' + params);
+  if (!d.ok) return;
+
+  const totalPages = Math.max(1, Math.ceil(d.total / d.size));
+  document.getElementById('estados-page-info').textContent = `Página ${d.page} de ${totalPages} — ${fmt(d.total)} productos`;
+  document.getElementById('estados-count').textContent = fmt(d.total) + ' resultados';
+  document.getElementById('estados-prev').disabled = d.page <= 1;
+  document.getElementById('estados-next').disabled = d.page >= totalPages;
+
+  const tbody = document.getElementById('estados-body');
+  if (!d.data || !d.data.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.data.map(r => {
+    const fila = r.tiene_prediccion
+      ? `<tr data-codigo="${esc(r.CODIGO)}" onclick="openDetail(this.dataset.codigo)" title="Ver el historial y la predicción">`
+      : '<tr class="sin-detalle">';
+    return `${fila}
+      <td class="codigo">${esc(r.CODIGO)}</td>
+      <td class="desc" title="${esc(r.DESCRIPCION)}">${esc(r.DESCRIPCION)}</td>
+      <td style="font-size:12px;color:var(--muted)">${esc(r.grupo || '—')}</td>
+      <td>${estadoBadge(r.estado)}</td>
+      <td>${fmt(r.meses_con_venta)}</td>
+      <td>${mesCorto(r.ultimo_mes_venta)}<div style="font-size:10px;color:var(--muted)">${haceMeses(r.meses_sin_venta)}</div></td>
+      <td>${r.ventas_12m > 0 ? COP(r.ventas_12m) : '$0'}</td>
+      <td>${prediccionHtml(r)}</td>
+    </tr>`;
+  }).join('');
+}
+
 // ── Detalle de producto ───────────────────────────────────────────────────────
 async function openDetail(codigo) {
   const overlay = document.getElementById('detail-overlay');
@@ -1127,7 +1347,7 @@ function closeDetailOverlay(e) {
     loadSummary();
     // Enlace directo a una vista: /#grupos, /#productos
     const vista = location.hash.replace('#', '');
-    if (vista === 'grupos' || vista === 'productos') {
+    if (vista === 'grupos' || vista === 'productos' || vista === 'estados') {
       nav(document.querySelector(`.nav-item[onclick*="'${vista}'"]`), vista);
     }
   }

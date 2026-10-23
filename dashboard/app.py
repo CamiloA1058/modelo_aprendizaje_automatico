@@ -640,7 +640,9 @@ def api_estados_descargar():
     for col in ("Ventas últimos 12 meses (COP)", "Promedio mensual (COP)",
                 "Monto estimado (COP)", "Stock sugerido (COP)"):
         if col in out.columns:
-            out[col] = out[col].astype(float).round(1)
+            out[col] = out[col].astype(float).round(0).astype("Int64")
+    if "Probabilidad de venta" in out.columns:
+        out["Probabilidad de venta"] = out["Probabilidad de venta"].astype(float).round(3)
     texto = out.to_csv(index=False, sep=";", decimal=",")
     nombre = f"estado_productos_{_state['mes_predicho'] or 'actual'}.csv"
     return Response(

@@ -165,7 +165,9 @@ class EstadosApiTest(unittest.TestCase):
         self.assertIn("Estado", df.columns)
         self.assertIn("Ventas últimos 12 meses (COP)", df.columns)
         self.assertEqual(df.loc[0, "Estado"], "Con recomendación y monto")
-        self.assertAlmostEqual(df.loc[2, "Promedio mensual (COP)"], 11.1)
+        self.assertEqual(df.loc[2, "Promedio mensual (COP)"], 11)
+        self.assertEqual(df.loc[0, "Ventas últimos 12 meses (COP)"], 600)
+        self.assertAlmostEqual(df.loc[0, "Probabilidad de venta"], 0.9)
 
 
 if __name__ == "__main__":
