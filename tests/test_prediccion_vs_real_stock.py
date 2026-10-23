@@ -44,14 +44,14 @@ class TablaStockTest(unittest.TestCase):
         self.f = self.t.set_index("Código")
 
     def test_columnas_nuevas_al_final_y_en_orden(self):
-        nuevas = ["Stock sugerido (70 %)", "Stock sugerido (unidades)",
+        nuevas = ["Stock sugerido", "Stock sugerido (unidades)",
                   "Unidades reales", "¿Cubrió la demanda?"]
         self.assertEqual(pr.COLUMNAS[-4:], nuevas)
         self.assertEqual(list(self.t.columns), pr.COLUMNAS)
 
     def test_valores(self):
         f = self.f
-        self.assertEqual(f.loc["A", "Stock sugerido (70 %)"], 210.0)
+        self.assertEqual(f.loc["A", "Stock sugerido"], 210.0)
         self.assertEqual(f.loc["A", "Stock sugerido (unidades)"], 4.0)
         self.assertEqual(f.loc["A", "Unidades reales"], 3.0)
         self.assertEqual(f.loc["D", "Unidades reales"], 0.0)
@@ -63,7 +63,7 @@ class TablaStockTest(unittest.TestCase):
     def test_sin_stock_en_los_resultados_queda_vacio(self):
         r = _resultados().drop(columns=["stock_sugerido", "stock_sugerido_unidades"])
         t = _tabla(r)
-        self.assertTrue(t["Stock sugerido (70 %)"].isna().all())
+        self.assertTrue(t["Stock sugerido"].isna().all())
         self.assertEqual(set(t["¿Cubrió la demanda?"]), {""})
 
     def test_sin_unidades_reales_queda_nan(self):

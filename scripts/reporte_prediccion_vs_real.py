@@ -8,9 +8,11 @@ Lista por producto de la prediccion del algoritmo frente a las ventas reales.
   2026-03-31); lo real sale de data/holdout/ventas_2026_04_09.csv.
 - Una hoja por mes del estudio de caso (2026-04 a 2026-09) con origen rodante
   (scripts/estudio_caso.py: se entrena solo con datos anteriores a cada mes).
-- "Resumen" con totales por mes, "Grupos" (suma de las predicciones por grupo de
-  producto frente a lo real, con el acierto ponderado por valor de cada mes) y
-  "Cómo leer" con la explicacion de columnas.
+- "Resumen" con totales por mes y de los seis meses, incluido el resultado por
+  accion (Comprar más, Mantener, No reponer este mes, Revisar, Por promedio),
+  "Grupos" (venta esperada por grupo de producto frente a lo real, con el
+  acierto ponderado por valor de cada mes) y "Cómo leer" con la explicacion de
+  columnas.
 
 Incluye la estimacion por promedio (productos sin ventas el ultimo mes) y no
 contiene datos de clientes.
@@ -44,18 +46,21 @@ NOMBRES_MES = {
     "2026-04": "Abril 2026", "2026-05": "Mayo 2026", "2026-06": "Junio 2026",
     "2026-07": "Julio 2026", "2026-08": "Agosto 2026", "2026-09": "Septiembre 2026",
 }
-COLS_COP = ["Ventas mes anterior (COP)", "Predicción combinada (COP)",
+COLS_COP = ["Ventas mes anterior (COP)", "Monto esperado (COP)", "Venta esperada (COP)",
+            "Predicción combinada (COP)",
             "Solo modelo (COP)", "Real del mes (COP)",
-            "Diferencia (real − predicción)", "Stock sugerido (70 %)",
+            "Diferencia (real − predicción)", "Stock sugerido",
             "Stock sugerido (unidades)"]
-ANCHOS = {"Código": 11, "Descripción": 52, "Origen": 10, "Decisión recomendada": 40,
+ANCHOS = {"Código": 11, "Descripción": 52, "Origen": 10, "Acción": 20,
+          "Decisión recomendada": 40, "Monto esperado (COP)": 16, "Rango del monto": 26,
+          "Venta esperada (COP)": 16, "¿Acertó la acción?": 12,
           "Prob. crecimiento": 13, "Ventas mes anterior (COP)": 18,
           "Predicción combinada (COP)": 19, "Solo modelo (COP)": 16,
           "Real del mes (COP)": 16, "Diferencia (real − predicción)": 19,
           "Error %": 9, "Clase real": 11, "¿Acertó la decisión?": 13,
           "Probabilidad de venta": 14, "¿Se venderá? (predicción)": 14,
           "¿Se vendió?": 11, "¿Acertó venta?": 11,
-          "Stock sugerido (70 %)": 16, "Stock sugerido (unidades)": 14,
+          "Stock sugerido": 16, "Stock sugerido (unidades)": 14,
           "Unidades reales": 12, "¿Cubrió la demanda?": 13}
 
 COMO_LEER = [
@@ -77,12 +82,27 @@ COMO_LEER = [
                "regresor) da una decisión y un monto. promedio: el producto no vendió el "
                "último mes pero sí en los meses previos; su monto es el promedio de los "
                "últimos 3 meses y no recibe decisión del modelo."),
-    ("Decisión recomendada", "Reforzar stock, Mantener stock o Reducir stock (solo origen "
+    ("Acción", "Lo que muestra el dashboard: Comprar más, Mantener, No reponer este mes, "
+               "Revisar o Por promedio (origen promedio). Comprar más exige que el modelo "
+               "tenga suficiente confianza en el crecimiento y que sea probable que el "
+               "producto se venda."),
+    ("Decisión recomendada", "Decisión final del modelo detrás de la acción: Reforzar stock "
+                             "(= Comprar más), Mantener stock o Reducir stock (solo origen "
                              "modelo). Para origen promedio dice \"Sin recomendación "
                              "(estimación por promedio)\"."),
     ("Prob. crecimiento", "Probabilidad que da el modelo de que el producto crezca más de "
                           "15 %. Solo origen modelo."),
     ("Ventas mes anterior (COP)", "Ventas del último mes con datos antes del mes predicho."),
+    ("Monto esperado (COP)", "El monto que muestra el dashboard según la acción: venta esperada "
+                             "para Comprar más y Mantener; 0 (sin venta esperada) para No "
+                             "reponer; para Revisar, ver \"Rango del monto\". En blanco para "
+                             "los productos sin monto."),
+    ("Rango del monto", "Solo para Revisar (y Por promedio con probabilidad intermedia): "
+                        "\"Entre 0 y X si se vende\", donde X es lo que el producto vende "
+                        "cuando se vende."),
+    ("Venta esperada (COP)", "Probabilidad de venta × lo que el producto vende cuando se vende "
+                             "(promedio de sus últimos meses con venta). Es lo que suma el "
+                             "total del dashboard para todos los productos con monto."),
     ("Predicción combinada (COP)", "Monto que muestra el sistema. Origen modelo: mezcla del "
                                    "modelo con el promedio de los últimos 3 meses (en blanco "
                                    "si el producto está fuera de los 1.900 con más ventas). "
@@ -97,6 +117,9 @@ COMO_LEER = [
                    "anterior. Crecimiento mayor a 15 % = Reforzar; caída mayor a 10 % o "
                    "ninguna venta = Reducir; en otro caso = Mantener. En blanco para origen "
                    "promedio."),
+    ("¿Acertó la acción?", "Comprar más: Sí si creció más de 15 % (clase real Reforzar). No "
+                           "reponer: Sí si no vendió o cayó más de 10 % (clase real Reducir). "
+                           "En blanco para las demás acciones."),
     ("¿Acertó la decisión?", "Sí si la decisión recomendada coincide con la clase real. En "
                              "blanco para origen promedio."),
     ("Probabilidad de venta", "Probabilidad (0 a 100 %) de que el producto tenga ventas el mes "
@@ -110,16 +133,15 @@ COMO_LEER = [
                     "vendió."),
     ("¿Acertó venta?", "Sí si la predicción \"¿Se venderá?\" coincide con lo que pasó "
                        "(\"¿Se vendió?\")."),
-    ("Stock sugerido (70 %)", "Nivel de abastecimiento (COP) para el mes: si se tiene en "
-                              "inventario hasta este valor, la demanda queda cubierta en "
-                              "cerca de 7 de cada 10 productos. Se calcula corrigiendo la "
-                              "predicción con los errores del modelo en su validación "
-                              "interna (nunca con el mes evaluado), según la probabilidad "
-                              "de venta del producto. Es un máximo de abastecimiento, no "
-                              "una predicción exacta: normalmente queda por encima de lo "
-                              "que se vende y para los productos con muy baja probabilidad "
-                              "de venta es casi cero. En blanco para los productos del modelo "
-                              "sin monto predicho."),
+    ("Stock sugerido", "Nivel de abastecimiento (COP) para el mes según la acción. Comprar "
+                       "más, Mantener y Por promedio: nivel de servicio del 70 % (la "
+                       "predicción corregida con los errores del modelo en su validación "
+                       "interna, nunca con el mes evaluado, según la probabilidad de venta). "
+                       "No reponer: 0. Revisar: el monto predicho. Esta regla se adoptó "
+                       "porque en la validación interna de cada mes mantuvo la cobertura a "
+                       "menos de 3 puntos del 70 % para todos y bajó el stock. Es un máximo "
+                       "de abastecimiento, no una predicción exacta. En blanco para los "
+                       "productos del modelo sin monto predicho."),
     ("Stock sugerido (unidades)", "El stock sugerido en pesos dividido entre el último precio "
                                   "promedio conocido del producto, redondeado hacia arriba."),
     ("Unidades reales", "Unidades que realmente se vendieron ese mes (0 si no hubo ventas)."),
@@ -127,7 +149,7 @@ COMO_LEER = [
                             "stock sugerido; No en otro caso. Un producto que no vendió cuenta "
                             "como cubierto."),
     ("Grupos", "Compara, por grupo de producto (la línea o proveedor con la que se compra), "
-               "la suma de las predicciones de sus productos con lo que realmente vendieron "
+               "la suma de la venta esperada de sus productos con lo que realmente vendieron "
                "esos mismos productos en el mes. Solo cuentan los productos con monto "
                "predicho (modelo y promedio), los mismos del dashboard; los productos sin "
                "grupo van en \"Sin grupo\". Acierto % = 1 menos el valor absoluto de "
@@ -138,16 +160,19 @@ COMO_LEER = [
                "es decir, qué parte del valor vendido se acertó. Debajo está el detalle "
                "por grupo y mes. Los meses con una caída fuerte de las ventas reales "
                "(junio) bajan el acierto de todos los grupos."),
-    ("Resumen", "Totales por mes: predicho por el modelo, por promedio y total, frente a lo "
-                "real; cobertura frente a lo real de los 1.900 productos con más ventas; "
+    ("Resumen", "Totales por mes y de los seis meses (\"Seis meses\"): predicho por el "
+                "modelo, por promedio y total, frente a lo real; productos y acierto por "
+                "acción, Comprar más con «se venderá: No», incoherencias de monto (se "
+                "venderá: No con un monto > 0, No reponer con monto > 0 o Comprar más con "
+                "monto menor al mes anterior) y venta esperada frente a lo real; "
+                "cobertura frente a lo real de los 1.900 productos con más ventas; "
                 "porcentaje de decisiones acertadas y error medio absoluto (MAE). "
                 "\"% acierto de venta\" es el porcentaje de productos cuya venta (sí/no) "
                 "se acertó entre los productos del modelo con monto y los de estimación "
                 "por promedio (los que muestra el dashboard con monto); \"% acierto de "
                 "venta (todos)\" incluye además los productos del modelo sin monto. "
                 "\"Cobertura del stock sugerido\" es el porcentaje de productos con stock "
-                "sugerido cuya demanda real quedó cubierta (la meta del nivel de servicio es "
-                "70 %; incluye los que no vendieron); \"Cobertura (los que vendieron)\" lo "
+                "sugerido cuya demanda real quedó cubierta (incluye los que no vendieron); \"Cobertura (los que vendieron)\" lo "
                 "mide solo entre los productos que sí vendieron, \"Cobertura (unidades)\" "
                 "compara las unidades reales con el stock en unidades y \"Stock total / real\" "
                 "es la suma del stock sugerido entre las ventas reales (sobrestock)."),
@@ -168,6 +193,7 @@ def entrenar_abril(tmp):
     m.estimar_por_promedio()
     m.agregar_probabilidad_venta()
     m.agregar_stock_sugerido()
+    m.agregar_accion()
     return m
 
 
@@ -251,7 +277,7 @@ def escribir_resumen(ws, resumen, cobertura=None):
         "sin monto."))
     if cobertura:
         ws.cell(row=ws.max_row + 2, column=1, value=(
-            f"Cobertura del stock sugerido (70 %) de los seis meses juntos: "
+            f"Cobertura del stock sugerido (por acción) de los seis meses juntos: "
             f"{100 * cobertura['cobertura']:.1f} % de {cobertura['n']:,} producto-mes "
             f"({100 * cobertura['cobertura_vendieron']:.1f} % entre los que vendieron; "
             f"unidades: {100 * cobertura['cobertura_unid']:.1f} %). Stock total / real: "
@@ -344,6 +370,7 @@ def main():
             model.estimar_por_promedio()
             model.agregar_probabilidad_venta()
             model.agregar_stock_sugerido()
+            model.agregar_accion()
             tabla, real_top = tabla_de_modelo(model, mes)
             tablas[mes] = tabla
             resumen.append(pr.resumen_mes(mes, tabla, real_top))
@@ -352,6 +379,8 @@ def main():
     escribir_como_leer(wb.active)
     wb.active.title = "Cómo leer"
     cobertura = pr.cobertura_agrupada(tablas)
+    resumen.append(pr.resumen_mes("Seis meses", pd.concat(list(tablas.values()),
+                                                          ignore_index=True)))
     escribir_resumen(wb.create_sheet("Resumen"), resumen, cobertura)
     por_grupo = {m: pr.tabla_grupos_mes(t, mapa) for m, t in tablas.items()}
     resumen_grupos = pr.resumen_grupos(por_grupo)

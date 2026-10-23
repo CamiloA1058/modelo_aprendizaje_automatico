@@ -9,6 +9,13 @@ Mantener. Los productos por promedio no tienen decision, asi que no tienen
 clase real ni acierto de decision. La probabilidad de venta (prob_venta /
 se_vendera de los resultados) existe para todos los productos: "¿Se vendió?"
 es real > 0 y "¿Acertó venta?" compara esa realidad con la prediccion.
+
+Con la accion unica (columnas accion, monto_mostrado, venta_esperada, ... de
+SalesForecastModel.agregar_accion) se agregan la accion, el monto que muestra
+el dashboard, la venta esperada y el acierto de la accion: Comprar más acierta
+si el producto crecio mas de growth (clase real Reforzar) y No reponer acierta
+si no vendio o cayo mas de reduce (clase real Reducir); las demas acciones no
+tienen una clase que acertar.
 """
 import numpy as np
 import pandas as pd
@@ -17,16 +24,24 @@ from ventas_forecast import case_study as cs
 from ventas_forecast import stock_sugerido as ss
 
 COLUMNAS = [
-    "Código", "Descripción", "Origen", "Decisión recomendada",
+    "Código", "Descripción", "Origen", "Acción", "Decisión recomendada",
     "Prob. crecimiento", "Ventas mes anterior (COP)",
+    "Monto esperado (COP)", "Rango del monto", "Venta esperada (COP)",
     "Predicción combinada (COP)", "Solo modelo (COP)", "Real del mes (COP)",
     "Diferencia (real − predicción)", "Error %", "Clase real",
-    "¿Acertó la decisión?",
+    "¿Acertó la acción?", "¿Acertó la decisión?",
     "Probabilidad de venta", "¿Se venderá? (predicción)", "¿Se vendió?",
     "¿Acertó venta?",
-    "Stock sugerido (70 %)", "Stock sugerido (unidades)", "Unidades reales",
+    "Stock sugerido", "Stock sugerido (unidades)", "Unidades reales",
     "¿Cubrió la demanda?",
 ]
+# Accion -> clase real que la hace acertada (las demas no se evaluan).
+_CLASE_DE_ACCION = {"comprar_mas": "Reforzar", "no_reponer": "Reducir"}
+
+
+def _miles(v):
+    """Entero con punto de miles (es-CO), para textos del reporte."""
+    return f"{v:,.0f}".replace(",", ".")
 _NOMBRE_CLASE = {0: "Reducir", 1: "Mantener", 2: "Reforzar"}
 _DECISION_A_NOMBRE = {"Reducir stock": "Reducir", "Mantener stock": "Mantener",
                       "Reforzar stock": "Reforzar"}
@@ -84,14 +99,39 @@ def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce,
         cubrio = np.full(len(r), "", dtype=object)
     real_u = (real_unid.reindex(ids.to_numpy()).fillna(0.0).to_numpy(float)
               if real_unid is not None else np.full(len(r), np.nan))
+
+    vacio = np.full(len(r), "", dtype=object)
+    nan = np.full(len(r), np.nan)
+    if "accion" in r.columns:
+        acc = r["accion"].fillna("").to_numpy(object)
+        acc_nombre = r["accion_nombre"].fillna("").to_numpy(object)
+        monto = r["monto_mostrado"].to_numpy(float)
+        ev = r["venta_esperada"].to_numpy(float)
+        si_vende = r["monto_si_vende"].to_numpy(float)
+        en_rango = r["monto_rango"].fillna(False).to_numpy(bool)
+        rango = np.where(en_rango, [f"Entre 0 y {_miles(v)} si se vende" if v == v else ""
+                                    for v in si_vende], "").astype(object)
+        objetivo = np.array([_CLASE_DE_ACCION.get(a, "") for a in acc], dtype=object)
+        clase_todos = np.array([_NOMBRE_CLASE[int(k)] for k in
+                                cs.real_class(real_v, base, growth, reduce)], dtype=object)
+        acierto_acc = np.where(objetivo == "", "",
+                               np.where(objetivo == clase_todos, "Sí", "No")).astype(object)
+    else:
+        acc_nombre, rango, acierto_acc = vacio, vacio.copy(), vacio.copy()
+        monto, ev = nan, nan.copy()
+
     out = pd.DataFrame({
         "Código": ids.to_numpy(),
         "Descripción": r[desc_col].to_numpy(),
         "Origen": origen,
+        "Acción": acc_nombre,
         "Decisión recomendada": r["decision"].to_numpy(),
         "Prob. crecimiento": np.where(es_prom, np.nan,
                                       r["prob_crecimiento"].to_numpy(float)),
         "Ventas mes anterior (COP)": base,
+        "Monto esperado (COP)": monto,
+        "Rango del monto": rango,
+        "Venta esperada (COP)": ev,
         "Predicción combinada (COP)": pred,
         "Solo modelo (COP)": (r["ventas_predichas_rf"].to_numpy(float)
                               if "ventas_predichas_rf" in r.columns
@@ -100,12 +140,13 @@ def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce,
         "Diferencia (real − predicción)": real_v - pred,
         "Error %": error,
         "Clase real": clase,
+        "¿Acertó la acción?": acierto_acc,
         "¿Acertó la decisión?": acierto,
         "Probabilidad de venta": prob_venta,
         "¿Se venderá? (predicción)": se_vendera,
         "¿Se vendió?": np.where(vendio, "Sí", "No"),
         "¿Acertó venta?": acierto_venta,
-        "Stock sugerido (70 %)": stock,
+        "Stock sugerido": stock,
         "Stock sugerido (unidades)": stock_u,
         "Unidades reales": real_u,
         "¿Cubrió la demanda?": cubrio,
@@ -116,8 +157,8 @@ def tabla_producto(results, real, id_col, desc_col, total_col, growth, reduce,
 def _cobertura_tabla(tabla):
     """Metricas de ventas_forecast.stock_sugerido.cobertura sobre las filas de
     la tabla con stock sugerido (el universo del dashboard)."""
-    t = tabla[tabla["Stock sugerido (70 %)"].notna()]
-    return ss.cobertura(t["Real del mes (COP)"], t["Stock sugerido (70 %)"],
+    t = tabla[tabla["Stock sugerido"].notna()]
+    return ss.cobertura(t["Real del mes (COP)"], t["Stock sugerido"],
                         t["Unidades reales"], t["Stock sugerido (unidades)"])
 
 
@@ -129,8 +170,9 @@ def cobertura_agrupada(tablas):
 
 def resumen_mes(mes, tabla, real_top_total=None):
     """Totales del mes: predicho (modelo / promedio / total) frente al real,
-    cobertura del real de los top productos, aciertos de las decisiones y MAE.
-    Las sumas del modelo usan solo los productos con monto."""
+    cobertura del real de los top productos, aciertos de las decisiones y MAE,
+    y el resumen por accion (ver _resumen_acciones). Las sumas del modelo usan
+    solo los productos con monto."""
     pred = "Predicción combinada (COP)"
     real = "Real del mes (COP)"
     mod = tabla[tabla["Origen"] == "modelo"]
@@ -149,7 +191,7 @@ def resumen_mes(mes, tabla, real_top_total=None):
     pred_mod, pred_prom = float(mod_m[pred].sum()), float(prom[pred].sum())
     real_mod, real_prom = float(mod_m[real].sum()), float(prom[real].sum())
     real_total = real_mod + real_prom
-    return {
+    out = {
         "Mes": mes,
         "Productos modelo": int(len(mod)),
         "Productos promedio": int(len(prom)),
@@ -186,6 +228,46 @@ def resumen_mes(mes, tabla, real_top_total=None):
         "Cobertura (unidades)": cob["cobertura_unid"],
         "Stock total / real": cob["total_stock_real"],
     }
+    out.update(_resumen_acciones(tabla, real_total))
+    return out
+
+
+def _resumen_acciones(tabla, real_total):
+    """Productos y acierto por accion, Comprar más con "se venderá: No",
+    incoherencias de monto (se venderá: No con un monto puntual > 0, No reponer
+    con monto > 0 o Comprar más con monto menor al mes anterior) y venta
+    esperada de los productos con monto frente a lo real."""
+    acc = tabla["Acción"]
+    con = tabla["Predicción combinada (COP)"].notna()
+    monto = tabla["Monto esperado (COP)"]
+    base = tabla["Ventas mes anterior (COP)"]
+    nan = float("nan")
+
+    def _prec(nombre):
+        s = tabla[acc == nombre]["¿Acertó la acción?"]
+        return float((s == "Sí").mean()) if len(s) else nan
+
+    comprar = acc == "Comprar más"
+    inc = (((tabla["¿Se venderá? (predicción)"] == "No") & (tabla["Rango del monto"] == "")
+            & (monto > 0))
+           | ((acc == "No reponer este mes") & (monto > 0))
+           | (comprar & (monto < base)))
+    ev = float(tabla.loc[con, "Venta esperada (COP)"].sum())
+    return {
+        "Comprar más (productos)": int(comprar.sum()),
+        "% acierto Comprar más": _prec("Comprar más"),
+        "Comprar más con «se venderá: No»": int(
+            (comprar & (tabla["¿Se venderá? (predicción)"] == "No")).sum()),
+        "Mantener (productos)": int((acc == "Mantener").sum()),
+        "No reponer (productos)": int((acc == "No reponer este mes").sum()),
+        "% acierto No reponer": _prec("No reponer este mes"),
+        "Revisar (productos)": int((acc == "Revisar").sum()),
+        "Por promedio (productos)": int((acc == "Por promedio").sum()),
+        "Incoherencias de monto": int((inc & con).sum()),
+        "Venta esperada (COP)": ev,
+        "Razón venta esperada / real": ev / real_total if real_total else nan,
+    }
+
 
 
 # ── Vista por grupo de producto ──────────────────────────────────────────────
@@ -195,13 +277,16 @@ COLUMNAS_GRUPO = ["Grupo", "Productos", "Predicción (COP)", "Real (COP)",
 
 def tabla_grupos_mes(tabla, mapa):
     """Una fila por grupo con los productos que muestra el dashboard (los que
-    tienen monto predicho, modelo y promedio): prediccion = suma de las
-    predicciones por producto (G0), real = suma de lo vendido por esos mismos
+    tienen monto predicho, modelo y promedio): prediccion = suma de la venta
+    esperada (o de las predicciones combinadas sin accion unica), real = suma de lo vendido por esos mismos
     productos, diferencia y acierto 1 - |R-P|/R recortado a [0, 1] (vacio si
     el real es 0). Ordenada por la prediccion del grupo."""
     from ventas_forecast import grupos as gr
     pred_col, real_col = "Predicción combinada (COP)", "Real del mes (COP)"
     t = tabla[tabla[pred_col].notna()]
+    # Con la accion unica la prediccion del grupo es la venta esperada.
+    if "Venta esperada (COP)" in t.columns and t["Venta esperada (COP)"].notna().any():
+        pred_col = "Venta esperada (COP)"
     grupo = pd.Series(gr.asignar_grupo(t["Código"], mapa), index=t.index)
     grupo = grupo.where(grupo != gr.SIN_GRUPO, gr.ETIQUETA_SIN_GRUPO)
     g = pd.DataFrame({"grupo": grupo, "n": 1, "pred": t[pred_col].astype(float),

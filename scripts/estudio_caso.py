@@ -8,6 +8,13 @@ Estudio de caso fuera de muestra con origen rodante. Para cada mes objetivo M
 estrictamente ANTERIOR a M, predice M exactamente como entrenar.py y lo compara
 con las ventas reales de M (data/holdout/ventas_2026_04_09.csv).
 
+Las decisiones que se evaluan son las finales del sistema (con el umbral t de
+Reforzar y la coherencia con la probabilidad de venta de agregar_accion). Ademas
+reporta la accion unica de todos los productos del dashboard (modelo y
+promedio): productos y acierto de Comprar más y de No reponer este mes,
+incoherencias de monto, venta esperada frente a lo real y cobertura del stock
+sugerido por accion.
+
 Los meses del holdout nunca se usaron para elegir k ni hiperparametros.
 
 Genera:
@@ -32,6 +39,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ventas_forecast import case_study as cs  # noqa: E402
 from ventas_forecast import eligibility as el  # noqa: E402
+from ventas_forecast import prediccion_vs_real as pr  # noqa: E402
 from ventas_forecast.model import SalesForecastModel  # noqa: E402
 from ventas_forecast.paths import (  # noqa: E402
     DEFAULT_DATASET, FIGURES, PROJECT_ROOT, REPORTS, ensure_output_dirs,
@@ -103,6 +111,72 @@ def evaluar_mes(mes, tmp_dir, con_modelo=False, dataset=None, sample_weight_fn=N
     return res, escala, mayoritaria
 
 
+def completar_accion(model, res, mes):
+    """Corre el resto del pipeline de produccion (promedio, probabilidad de
+    venta, stock y accion), deja en res la decision final de cada producto
+    del modelo y devuelve la tabla por producto de prediccion_vs_real (todos
+    los productos del dashboard) con lo real de mes."""
+    model.estimar_por_promedio()
+    model.agregar_probabilidad_venta()
+    model.agregar_stock_sugerido()
+    model.agregar_accion()
+    final = model.results.loc[res.index, "decision"]
+    res["decision"] = final.to_numpy()
+    res["clase_pred"] = res["decision"].map(DECISION_A_CLASE)
+    c = model._c
+    return pr.tabla_producto(model.results, cs.monthly_sales(HOLDOUT, mes), c("id"),
+                             c("description"), c("total_sold"), model.growth_threshold,
+                             model.reduce_threshold,
+                             real_unid=cs.monthly_units(HOLDOUT, mes))
+
+
+def umbrales_accion(model):
+    """Lo elegido con la validacion interna del mes (para el reporte)."""
+    rs = model.regla_stock or {}
+    return {"t_reforzar": model.umbral_reforzar, "umbral_venta": model.sale_threshold,
+            "s_baja": model.s_baja, "monto_si_vende": model.monto_si_vende_clave,
+            "stock_val_cob_70": rs.get("cobertura_nivel"),
+            "stock_val_cob_accion": rs.get("cobertura_regla"),
+            "stock_val_razon_70": rs.get("stock_real_nivel"),
+            "stock_val_razon_accion": rs.get("stock_real_regla"),
+            "stock_por_accion": rs.get("adoptada")}
+
+
+COLS_ACCION = ["Comprar más (productos)", "% acierto Comprar más",
+               "Comprar más con «se venderá: No»", "Mantener (productos)",
+               "No reponer (productos)", "% acierto No reponer", "Revisar (productos)",
+               "Por promedio (productos)", "Incoherencias de monto",
+               "Venta esperada (COP)", "Razón venta esperada / real",
+               "Cobertura del stock sugerido", "Stock total / real"]
+
+
+def bloque_accion(titulo, r, umbrales=None):
+    L = [titulo, "-" * 70]
+    if umbrales:
+        L.append(f"Elegido con la validacion interna: t Reforzar {umbrales['t_reforzar']} | "
+                 f"umbral de venta {umbrales['umbral_venta']:.2f} | s_baja "
+                 f"{umbrales['s_baja']:.2f} | monto si se vende {umbrales['monto_si_vende']}")
+        if umbrales["stock_por_accion"] is not None:
+            L.append(f"  Stock por accion en la validacion interna: cobertura "
+                     f"{100 * umbrales['stock_val_cob_70']:.1f} % -> "
+                     f"{100 * umbrales['stock_val_cob_accion']:.1f} %, stock/real "
+                     f"{umbrales['stock_val_razon_70']:.3f} -> "
+                     f"{umbrales['stock_val_razon_accion']:.3f} -> "
+                     f"{'adoptado' if umbrales['stock_por_accion'] else 'NO adoptado'}")
+    L.append(f"Comprar más {r['Comprar más (productos)']:,} (acierto "
+             f"{100 * r['% acierto Comprar más']:.1f} %; con «se venderá: No» "
+             f"{r['Comprar más con «se venderá: No»']}) | No reponer "
+             f"{r['No reponer (productos)']:,} (acierto {100 * r['% acierto No reponer']:.1f} %)"
+             f" | Mantener {r['Mantener (productos)']:,} | Revisar "
+             f"{r['Revisar (productos)']:,} | Por promedio {r['Por promedio (productos)']:,}")
+    L.append(f"Incoherencias de monto {r['Incoherencias de monto']} | venta esperada / real "
+             f"{r['Razón venta esperada / real']:.3f} | stock sugerido: cobertura "
+             f"{100 * r['Cobertura del stock sugerido']:.1f} %, stock / real "
+             f"{r['Stock total / real']:.3f}")
+    L.append("")
+    return L
+
+
 def resumen_mes(res, escala, mayoritaria):
     dec = cs.classification_summary(res["clase_real"], res["clase_pred"])
     base = cs.majority_baseline_summary(res["clase_real"], mayoritaria)
@@ -131,7 +205,7 @@ def sumas_mes(res, ventas_mes):
     }
 
 
-def fila_csv(mes, dec, base, reg, sumas):
+def fila_csv(mes, dec, base, reg, sumas, accion=None, umbrales=None):
     fila = {
         "mes": mes, "n_decisiones": dec["n"],
         "f1_macro": dec["f1_macro"], "acc_balanceada": dec["balanced_accuracy"],
@@ -143,6 +217,10 @@ def fila_csv(mes, dec, base, reg, sumas):
         for k in ("mae", "rmse", "mase", "sum_ratio"):
             fila[f"{k}_{nombre}"] = r[k]
     fila.update(sumas)
+    if accion is not None:
+        fila.update({k: accion[k] for k in COLS_ACCION})
+    if umbrales is not None:
+        fila.update(umbrales)
     return fila
 
 
@@ -214,14 +292,20 @@ def main():
     inicio = time.time()
     ensure_output_dirs()
     todos, filas, lineas_mes, escalas, mayoritarias, sumas_todas = [], [], [], [], [], []
+    tablas, lineas_acc = [], []
     with tempfile.TemporaryDirectory() as tmp:
         for mes in MESES:
-            res, escala, mayoritaria = evaluar_mes(mes, tmp)
+            res, escala, mayoritaria, model = evaluar_mes(mes, tmp, con_modelo=True)
+            tabla = completar_accion(model, res, mes)
+            tablas.append(tabla)
+            acc_mes = pr.resumen_mes(mes, tabla)
+            umbrales = umbrales_accion(model)
+            lineas_acc += bloque_accion(f"MES {mes}", acc_mes, umbrales)
             dec, base, reg = resumen_mes(res, escala, mayoritaria)
             ventas_mes = cs.monthly_sales(HOLDOUT, mes).sum()
             sumas = sumas_mes(res, ventas_mes)
             sumas_todas.append(sumas)
-            filas.append(fila_csv(mes, dec, base, reg, sumas))
+            filas.append(fila_csv(mes, dec, base, reg, sumas, acc_mes, umbrales))
             lineas_mes += bloque_texto(f"MES {mes}", dec, base, reg, sumas)
             todos.append(res)
             escalas.append((escala, int(res["ventas_predichas_rf"].notna().sum())))
@@ -231,7 +315,8 @@ def main():
     escala_p = cs.pooled_scale(escalas)
     dec_p, base_p, reg_p = resumen_mes(pool, escala_p, 0)
     sumas_p = {k: sum(x[k] for x in sumas_todas) for k in sumas_todas[0]}
-    filas.append(fila_csv("agrupado", dec_p, base_p, reg_p, sumas_p))
+    acc_p = pr.resumen_mes("agrupado", pd.concat(tablas, ignore_index=True))
+    filas.append(fila_csv("agrupado", dec_p, base_p, reg_p, sumas_p, acc_p))
 
     L = ["ESTUDIO DE CASO FUERA DE MUESTRA (origen rodante)", "=" * 70, "",
          "Para cada mes M se entrena con la V6 mas el holdout anterior a M (nunca M) y se "
@@ -248,6 +333,14 @@ def main():
          "septiembre estan incompletas (favorece a Reducir y baja la razon de sumas).", ""]
     L += lineas_mes
     L += bloque_texto("AGRUPADO (todos los meses)", dec_p, base_p, reg_p, sumas_p)
+    L += ["ACCION UNICA (todos los productos del dashboard: modelo y promedio)", "=" * 70,
+          "Acierto de Comprar más = crecio mas de 15 % (clase real Reforzar); de No reponer "
+          "= no vendio o cayo mas de 10 % (clase real Reducir). Incoherencias de monto: "
+          "«se venderá: No» con un monto puntual > 0, No reponer con monto > 0 o Comprar más "
+          "con monto menor al mes anterior (este ultimo caso es permitido: el monto es la "
+          "venta esperada, que descuenta la probabilidad de venta).", ""]
+    L += lineas_acc
+    L += bloque_accion("AGRUPADO (todos los meses)", acc_p)
     L += ["RESUMEN DE SUMAS EN PESOS POR MES (millones de COP)", "-" * 70,
           f"{'Mes':<10}{'Pred. modelo':>14}{'Pred. mezcla':>14}{'Real (con pred.)':>18}{'Ingenuo':>10}"
           f"{'Media_3':>10}{'Ventas reales mes':>19}"]
