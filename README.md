@@ -75,6 +75,7 @@ modelo_aprendizaje_automatico/
 │   ├── model.py                 # Modelo FINAL: SalesForecastModel
 │   ├── paths.py                 # Rutas centralizadas (DEFAULT_DATASET, UPLOADS, ...)
 │   ├── eda.py                   # Funciones de análisis exploratorio
+│   ├── estado_productos.py      # Estado de todos los productos (cinco estados)
 │   ├── benchmarks.py            # Utilidades de comparación RF/XGBoost/Prophet/ARIMA
 │   └── data/cleaning.py         # DatasetCleaner + remove_bulk_adjustments
 │
@@ -138,6 +139,8 @@ PYTHONIOENCODING=utf-8 python scripts/reporte_prediccion_vs_real.py  # Excel pre
 PYTHONIOENCODING=utf-8 python -m unittest discover -s tests
 ```
 
+Con `VENTAS_PRUEBA_DATOS_REALES=1` se ejecuta además una prueba que corre el modelo con `data/raw/Query_Result_V6.csv` (unos 30 s) y comprueba los conteos por estado de abril de 2026.
+
 ### Salidas
 
 Los resultados se guardan en `outputs/` (gitignored):
@@ -151,7 +154,7 @@ Los resultados se guardan en `outputs/` (gitignored):
 
 ## Dashboard
 
-Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen general (KPIs, historial, distribución de decisiones, top de productos), vista por grupo de producto, catálogo de predicciones con búsqueda, filtros y descarga del CSV, detalle por producto y ejecución del modelo con subida de CSV o lectura directa de la base de datos del taller (ver [Leer directamente de la base de datos](#leer-directamente-de-la-base-de-datos)) y parámetros.
+Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen general (KPIs, historial, distribución de decisiones, top de productos), vista por grupo de producto, estado de todos los productos, catálogo de predicciones con búsqueda, filtros y descarga del CSV, detalle por producto y ejecución del modelo con subida de CSV o lectura directa de la base de datos del taller (ver [Leer directamente de la base de datos](#leer-directamente-de-la-base-de-datos)) y parámetros.
 
 **Predicción combinada.** El monto predicho por producto (`ventas_predichas`) es `w x RF + (1 - w) x media_3`, donde `media_3` es el promedio de los últimos 3 meses del producto y `w` (0, 0,1 ... 1) se elige con la validación interna dentro del entrenamiento (un regresor temporal ajustado con los primeros meses de entrenamiento de cada producto predice sus últimos meses de entrenamiento), minimizando |suma predicha - suma real|; la prueba interna solo reporta. El RF puro se conserva en `ventas_predichas_rf`. El KPI "Ventas predichas" muestra la suma de la mezcla (con `w` en porcentaje), el detalle del producto agrega "Solo modelo: $..." y el CSV descargable trae ambas columnas. En la última corrida real `w` = 0,0 (en la validación interna el RF predice el 23,6 % de la suma real y la media de 3 meses el 94,8 %), así que el monto combinado de abril es la media de 3 meses; en la prueba interna la razón suma predicha/real es 0,59 (RF) y 1,29 (mezcla) (ver `outputs/reports/evaluacion_modelo.txt` y la entrada "[Validación] V1" de `docs/CHANGELOG.md`).
 
@@ -163,6 +166,18 @@ Interfaz web local para usuarios sin conocimientos técnicos. Pestañas: resumen
 
 **Vista por grupo de producto.** La vista "Grupos" suma las predicciones por producto de cada grupo del catálogo `data/raw/grupos_productos.csv` (la línea o proveedor con la que compra el taller): productos con monto, cuántos se venderán, predicción del grupo, ventas del mes anterior, variación y porcentaje del total, con buscador; un clic en un grupo abre "Productos" filtrado por él. `SalesForecastModel.agregar_resumen_grupo()` (activo por defecto, `resumen_por_grupo=False` lo desactiva) solo lee los resultados y no cambia ninguna predicción, decisión ni total. En abril a septiembre de 2026 esta suma acertó el 68,9 % del valor vendido por grupo (74,1 % en los 20 grupos que más vendieron el mes anterior); úsela como guía para planear pedidos por línea (entrada "[Sistema] Vista por grupo de producto" de `docs/CHANGELOG.md`). La hoja "Grupos" de `prediccion_vs_real.xlsx` trae la comparación contra lo real mes a mes.
 
+**Estado de todos los productos.** La vista "Todos los productos" muestra qué pasa con cada producto vendido en los datos, no solo con los que reciben predicción. Cada producto queda en uno solo de cinco estados:
+
+| Estado | Regla | Abril de 2026 (V6) |
+|---|---|---|
+| Con recomendación y monto | Vendió el último mes, tiene `min_months` (6) o más meses con ventas y está entre los 1.900 con más ventas | 645 |
+| Solo recomendación | Igual, pero fuera de los 1.900: tiene decisión del modelo, sin monto | 52 |
+| Monto por promedio | Entre los 1.900, 6 o más meses con ventas, no vendió el último mes y sí en los últimos 3 meses (estimación por promedio) | 348 |
+| Venta ocasional | Menos de 6 meses con ventas en su historial | 2.260 |
+| Sin ventas recientes | 6 o más meses con ventas, pero sin una venta reciente que lo deje en los estados anteriores | 279 |
+
+En total 3.584 productos, 1.045 con predicción. Arriba hay una tarjeta por estado con el número de productos, su porcentaje y su parte de las ventas de los últimos 12 meses, más una explicación corta para el cliente; un clic en la tarjeta filtra la tabla. La tabla (código, descripción, grupo, estado, meses con venta, última venta, ventas de 12 meses y, si tiene predicción, decisión y monto) permite buscar, filtrar por estado, ordenar por ventas de 12 meses, meses sin vender o código, abrir el detalle de los productos con predicción y descargar todo en CSV (separador `;`, coma decimal). `SalesForecastModel.clasificar_estado_productos()` (lo llama `run()` al final y también el dashboard) deja la tabla en `model.estado_productos` y no cambia ningún cálculo ni columna existente. Los nombres y las explicaciones de los estados están solo en `ESTADOS` de `src/ventas_forecast/estado_productos.py`, para poder cambiarlos sin tocar la vista (entrada "[Sistema] Estado de todos los productos" de `docs/CHANGELOG.md`).
+
 ```
 Navegador (dashboard/dashboard.html)
         │  HTTP / JSON
@@ -171,9 +186,12 @@ Navegador (dashboard/dashboard.html)
         ├── GET  /api/status        Estado del pipeline + mes predicho + fuente (csv/bd) y rango leído
         ├── POST /api/run           Lanza el modelo en un hilo secundario (fuente=csv | bd)
         ├── GET  /api/bd/estado     ¿Está configurada la lectura de la base? (sin rutas ni claves)
-        ├── GET  /api/summary       KPIs, pred_total (modelo + promedio), pred_total_modelo, pred_total_promedio, n_promedio, n_se_vendera, sale_threshold, pred_total_rf, blend_weight, historial, métricas, top productos
+        ├── GET  /api/summary       KPIs, pred_total (modelo + promedio), pred_total_modelo, pred_total_promedio, n_promedio, n_se_vendera, sale_threshold, pred_total_rf, blend_weight, historial, métricas, top productos, conteo por estado (`estados`)
         ├── GET  /api/products      Lista paginada con filtros (incluye grupo) y orden
         ├── GET  /api/grupos        Suma de predicciones por grupo de producto
+        ├── GET  /api/estados       Productos y ventas de 12 meses por estado (todos los productos)
+        ├── GET  /api/estados/productos   Lista paginada de todos los productos (estado, búsqueda, grupo, orden)
+        ├── GET  /api/estados/descargar   CSV con el estado de todos los productos
         ├── GET  /api/product/<id>  Historial + predicción de un producto
         └── GET  /api/download      Descarga PREDICCION_MENSUAL.csv
               ▼

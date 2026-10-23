@@ -1,3 +1,25 @@
+## [Sistema] Estado de todos los productos - 2026-10-23
+
+El dashboard solo listaba los productos con predicción (1.045 en abril de 2026); el dueño del taller no veía qué pasaba con los otros 2.539 vendidos en los últimos dos años. La vista nueva "Todos los productos" muestra el estado de cada uno. Es para la entrega del software al taller; no forma parte del trabajo de grado.
+
+- **Cinco estados disjuntos** que suman todos los productos de los datos. Los tres con predicción salen de los resultados del modelo; los otros dos, del historial:
+
+  | Estado | Regla | Productos (abril de 2026, V6) |
+  |---|---|---|
+  | Con recomendación y monto | Vendió el último mes, `min_months` (6) o más meses con ventas, entre los 1.900 con más ventas | 645 |
+  | Solo recomendación | Igual, fuera de los 1.900 (decisión sin monto) | 52 |
+  | Monto por promedio | Entre los 1.900, 6 o más meses con ventas, no vendió el último mes, con ventas en los últimos 3 meses | 348 |
+  | Venta ocasional | Menos de 6 meses con ventas | 2.260 |
+  | Sin ventas recientes | 6 o más meses con ventas, sin venta reciente que lo deje en los estados anteriores | 279 |
+  | **Total** | | **3.584** |
+
+  En ventas de los últimos 12 meses: 62,4 %, menos de 0,1 %, 15,5 %, 17,9 % y 4,1 %.
+- **Modelo:** `src/ventas_forecast/estado_productos.py` (`ESTADOS`: nombre y explicación de cada estado en un solo diccionario; `clasificar`, `resumen`, `catalogo`) y `SalesForecastModel.clasificar_estado_productos()`, llamado al final de `run()` y en el pipeline del dashboard. Deja en `model.estado_productos` una fila por producto: código, descripción, grupo (con catálogo), estado, meses con venta, último mes con venta, meses desde la última venta, ventas de los últimos 12 meses, promedio mensual de los meses con venta y, si tiene predicción, decisión, monto, probabilidad de venta, "se venderá" y stock sugerido. No cambia ningún cálculo ni columna existente.
+- **API:** `/api/estados` (productos, % de productos, ventas de 12 meses y su % por estado), `/api/estados/productos` (lista paginada con filtro por estado, búsqueda por código o nombre, grupo y orden por ventas de 12 meses, meses sin vender o código), `/api/estados/descargar` (CSV completo, separador `;`, coma decimal, pesos enteros) y `estados` en `/api/summary`.
+- **Vista:** ítem "Todos los productos" en el menú; nota con el total y cuántos tienen predicción; cinco tarjetas con conteo, porcentajes y explicación (un clic filtra la tabla); tabla con búsqueda, filtro, orden, paginación, enlace al detalle de los productos con predicción y "Descargar CSV". El resto de la interfaz no cambia.
+- **Prueba de humo** (puerto distinto de 5000, CSV por defecto): `/api/estados` dio 645 / 52 / 348 / 2.260 / 279 = 3.584, igual a los conteos calculados con los datos internos del modelo. Captura: `outputs/figures/panel_estado_productos.png`.
+- **Pruebas:** `tests/test_estado_productos.py` (cada regla con un producto por estado, exactamente `min_months`, venta el último mes con menos de `min_months` = venta ocasional, cambio de `min_months`, partición, columnas de apoyo, modelo entrenado con datos sintéticos, orden en `run()`; prueba opcional con el CSV real con `VENTAS_PRUEBA_DATOS_REALES=1`) y `tests/test_dashboard_estados.py` (endpoints). 490 pruebas.
+
 ## [Sistema] Lectura directa de la base de datos del taller - 2026-10-17
 
 El dashboard puede generar la predicción leyendo la base Firebird del taller, con los datos que haya hasta ese momento, en lugar de un CSV exportado a mano. La carga de un CSV no cambia. Es para la entrega del software al taller; no forma parte del trabajo de grado.
