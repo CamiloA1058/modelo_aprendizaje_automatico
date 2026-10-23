@@ -23,6 +23,8 @@
     --amber-bg:  #FAEEDA;
     --red:       #A32D2D;
     --red-bg:    #FCEBEB;
+    --violet:    #5B3FA6;
+    --violet-bg: #EFEAFB;
     --radius:    12px;
     --radius-sm: 8px;
   }
@@ -58,6 +60,7 @@
   .kpi.amber { border-left: 3px solid #EF9F27; }
   .kpi.blue  { border-left: 3px solid var(--accent); }
   .kpi.red   { border-left: 3px solid #E24B4A; }
+  .kpi.violet { border-left: 3px solid var(--violet); }
 
   /* BADGES */
   .badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
@@ -66,6 +69,14 @@
   .badge.blue  { background: var(--accent-bg); color: var(--accent); }
   .badge.red   { background: var(--red-bg); color: var(--red); }
   .badge.gray  { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+  .badge.violet { background: var(--violet-bg); color: var(--violet); }
+  .monto-nota { font-size: 10px; color: var(--muted); }
+  .acc-pildoras { display: inline-flex; gap: 4px; flex-wrap: nowrap; }
+  .acc-pildoras .badge { padding: 2px 7px; min-width: 24px; justify-content: center; }
+  #grupos-leyenda { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+  #page-grupos td, #page-grupos th { padding-left: 8px; padding-right: 8px; }
+  .mas-detalle { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--muted); margin: -8px 0 22px; }
+  .mas-detalle strong { color: var(--text); font-weight: 600; }
 
   /* TABLE */
   .table-wrap { overflow-x: auto; }
@@ -75,7 +86,7 @@
   tr:last-child td { border-bottom: none; }
   tbody tr:hover td { background: var(--bg); cursor: pointer; }
   #page-productos td, #page-productos th { padding-left: 6px; padding-right: 6px; }
-  #page-productos .desc { max-width: 100px; }
+  #page-productos .desc { max-width: 260px; }
   #page-productos .prob-bar { min-width: 22px; }
   #page-productos .prob-wrap { gap: 5px; }
   .codigo { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
@@ -242,40 +253,40 @@
       </div>
 
       <div class="kpi-grid" style="grid-template-columns:repeat(7,1fr)">
-        <div class="kpi blue">
-          <div class="kpi-label">Productos con decisión</div>
+        <div class="kpi">
+          <div class="kpi-label">Productos con predicción</div>
           <div class="kpi-value" id="kpi-total">—</div>
-          <div class="kpi-sub">modelo, con ≥6 meses de historial</div>
+          <div class="kpi-sub" id="kpi-total-sub">—</div>
         </div>
         <div class="kpi green">
-          <div class="kpi-label">Reforzar stock</div>
-          <div class="kpi-value" id="kpi-reforzar">—</div>
-          <div class="kpi-sub" id="kpi-reforzar-pct">—</div>
+          <div class="kpi-label">Comprar más</div>
+          <div class="kpi-value" id="kpi-acc-comprar_mas">—</div>
+          <div class="kpi-sub" id="kpi-acc-comprar_mas-pct">—</div>
         </div>
-        <div class="kpi">
-          <div class="kpi-label">Mantener stock</div>
-          <div class="kpi-value" id="kpi-mantener">—</div>
-          <div class="kpi-sub" id="kpi-mantener-pct">—</div>
+        <div class="kpi blue">
+          <div class="kpi-label">Mantener</div>
+          <div class="kpi-value" id="kpi-acc-mantener">—</div>
+          <div class="kpi-sub" id="kpi-acc-mantener-pct">—</div>
         </div>
         <div class="kpi red">
-          <div class="kpi-label">Reducir stock</div>
-          <div class="kpi-value" id="kpi-reducir">—</div>
-          <div class="kpi-sub" id="kpi-reducir-pct">—</div>
-        </div>
-        <div class="kpi" id="kpi-sinrec-box">
-          <div class="kpi-label">Sin recomendación</div>
-          <div class="kpi-value" id="kpi-sinrec">—</div>
-          <div class="kpi-sub">estimación por promedio (sin venta el último mes)</div>
-        </div>
-        <div class="kpi green" id="kpi-venta-box">
-          <div class="kpi-label">Probablemente se venderán</div>
-          <div class="kpi-value" id="kpi-venta" style="font-size:20px">—</div>
-          <div class="kpi-sub" id="kpi-venta-sub">Probabilidad de venta del mes</div>
+          <div class="kpi-label">No reponer este mes</div>
+          <div class="kpi-value" id="kpi-acc-no_reponer">—</div>
+          <div class="kpi-sub" id="kpi-acc-no_reponer-pct">—</div>
         </div>
         <div class="kpi amber">
-          <div class="kpi-label">Ventas predichas</div>
+          <div class="kpi-label">Revisar</div>
+          <div class="kpi-value" id="kpi-acc-revisar">—</div>
+          <div class="kpi-sub" id="kpi-acc-revisar-pct">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Por promedio</div>
+          <div class="kpi-value" id="kpi-acc-por_promedio">—</div>
+          <div class="kpi-sub" id="kpi-acc-por_promedio-pct">no vendió el mes pasado</div>
+        </div>
+        <div class="kpi amber">
+          <div class="kpi-label">Venta esperada</div>
           <div class="kpi-value" id="kpi-pred" style="font-size:20px">—</div>
-          <div class="kpi-sub" id="kpi-variacion">Combinación del modelo y el promedio de los últimos 3 meses</div>
+          <div class="kpi-sub" id="kpi-variacion">Probabilidad de venta × lo que vende cuando se vende</div>
         </div>
       </div>
 
@@ -284,7 +295,7 @@
           <div class="section-title">Historial de ventas + predicción del próximo mes</div>
           <div class="legend-row">
             <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1A1916"></span>Ventas reales (productos con predicción de monto)</span>
-            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1D4ED8"></span>Predicción próximo mes (modelo combinado + estimación por promedio)</span>
+            <span style="display:flex;align-items:center;gap:6px;"><span class="legend-dot" style="background:#1D4ED8"></span>Venta esperada del próximo mes (los mismos productos)</span>
           </div>
           <div class="chart-wrap" style="height:240px">
             <canvas id="chart-hist" role="img" aria-label="Historial de ventas totales y predicción del próximo mes"></canvas>
@@ -294,10 +305,10 @@
 
       <div class="chart-row">
         <div class="card">
-          <div class="section-title">Distribución de decisiones</div>
+          <div class="section-title">Distribución de acciones</div>
           <div style="display:flex;align-items:center;gap:20px;height:180px;">
             <div style="position:relative;width:150px;height:150px;flex-shrink:0;overflow:hidden;">
-              <canvas id="chart-donut" role="img" aria-label="Distribución reforzar vs mantener"></canvas>
+              <canvas id="chart-donut" role="img" aria-label="Distribución de productos por acción"></canvas>
             </div>
             <div id="donut-legend" style="font-size:12px;display:flex;flex-direction:column;gap:10px;"></div>
           </div>
@@ -309,13 +320,13 @@
       </div>
 
       <div class="card" style="margin-bottom:20px;">
-        <div class="section-title">Productos con mayor probabilidad de reducción de ventas</div>
+        <div class="section-title">No reponer este mes <span style="font-weight:400;color:var(--muted)">· los 20 que más vendieron el mes pasado</span></div>
         <div class="table-wrap">
           <table>
             <thead><tr>
               <th>Código</th><th>Descripción</th>
-              <th>Ventas base</th><th>Predicción</th><th style="white-space:normal;line-height:1.25;min-width:72px;" title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
-              <th>Prob. reducción</th><th>Decisión</th><th>Prob. venta</th><th>Se venderá</th>
+              <th>Ventas mes anterior</th><th>Monto esperado</th><th title="Comprar más y Mantener: cubrió la demanda de 7 de cada 10 productos en los meses de prueba. No reponer: 0. Revisar: el monto estimado">Stock sugerido</th>
+              <th>Prob. de venta</th><th>Acción</th>
             </tr></thead>
             <tbody id="top-risk-body"></tbody>
           </table>
@@ -323,13 +334,13 @@
       </div>
 
       <div class="card">
-        <div class="section-title">Productos con mayor probabilidad de crecimiento</div>
+        <div class="section-title">Comprar más <span style="font-weight:400;color:var(--muted)">· los 20 con más confianza</span></div>
         <div class="table-wrap">
           <table>
             <thead><tr>
               <th>Código</th><th>Descripción</th>
-              <th>Ventas base</th><th>Predicción</th><th style="white-space:normal;line-height:1.25;min-width:72px;" title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
-              <th>Prob. crecimiento</th><th>Decisión</th><th>Prob. venta</th><th>Se venderá</th>
+              <th>Ventas mes anterior</th><th>Monto esperado</th><th title="Comprar más y Mantener: cubrió la demanda de 7 de cada 10 productos en los meses de prueba. No reponer: 0. Revisar: el monto estimado">Stock sugerido</th>
+              <th>Prob. de venta</th><th>Acción</th>
             </tr></thead>
             <tbody id="top-growth-body"></tbody>
           </table>
@@ -342,7 +353,7 @@
   <div class="page" id="page-grupos">
     <div class="page-header">
       <h1>Predicción por grupo de producto</h1>
-      <p id="grupos-subtitle">Suma de las predicciones de los productos de cada grupo. Haz clic en un grupo para ver sus productos.</p>
+      <p id="grupos-subtitle">Venta esperada de los productos de cada grupo. Haz clic en un grupo para ver sus productos.</p>
     </div>
 
     <div class="card" style="margin-bottom:16px;font-size:13px;line-height:1.5;">
@@ -351,6 +362,7 @@
 
     <div class="toolbar">
       <input type="text" id="grupos-search" placeholder="Buscar grupo…" oninput="renderGrupos()">
+      <span id="grupos-leyenda"></span>
       <span id="grupos-count" style="margin-left:auto;font-size:12px;color:var(--muted);"></span>
     </div>
 
@@ -360,12 +372,12 @@
           <thead><tr>
             <th>Grupo</th>
             <th title="Productos con monto predicho (modelo y promedio)">Productos</th>
-            <th title="Productos que probablemente se venderán el mes predicho">Se venderán</th>
-            <th>Predicción <small id="th-grupos-mes" style="font-size:9px;font-weight:400"></small></th>
+            <th title="Cuántos productos del grupo tienen cada acción">Acciones</th>
+            <th>Venta esperada <small id="th-grupos-mes" style="font-size:9px;font-weight:400"></small></th>
             <th>Ventas mes anterior</th>
             <th>Variación</th>
             <th>% del total</th>
-            <th title="Suma del stock sugerido de los productos del grupo (70 % por producto). Como cada producto se cubre por separado, la suma suele quedar por encima de lo que el grupo vende en total">Stock sugerido (70 %)</th>
+            <th title="Suma del stock sugerido de los productos del grupo, según la acción de cada uno. Como cada producto se cubre por separado, la suma suele quedar por encima de lo que el grupo vende en total">Stock sugerido</th>
           </tr></thead>
           <tbody id="grupos-body">
             <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
@@ -389,7 +401,7 @@
     <div id="estados-content" style="display:none">
       <div class="card" id="estados-nota" style="margin-bottom:16px;font-size:13px;line-height:1.5;"></div>
 
-      <div class="kpi-grid estado-grid" id="estados-cards" style="grid-template-columns:repeat(5,1fr)"></div>
+      <div class="kpi-grid estado-grid" id="estados-cards" style="grid-template-columns:repeat(6,1fr)"></div>
 
       <div class="toolbar">
         <input type="text" id="estados-search" placeholder="Buscar por código o nombre…" oninput="filtrarEstados()">
@@ -416,7 +428,7 @@
               <th title="Meses en los que el producto tuvo alguna venta">Meses con venta</th>
               <th>Última venta</th>
               <th>Ventas <small style="font-size:9px;font-weight:400">últimos 12 meses</small></th>
-              <th title="Recomendación y monto estimado de los productos con predicción">Predicción <small id="th-estados-mes" style="font-size:9px;font-weight:400"></small></th>
+              <th title="Acción y monto esperado de los productos con predicción">Predicción <small id="th-estados-mes" style="font-size:9px;font-weight:400"></small></th>
             </tr></thead>
             <tbody id="estados-body">
               <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
@@ -440,28 +452,18 @@
     </div>
 
     <div class="card" style="margin-bottom:16px;font-size:13px;line-height:1.5;">
-      <strong>Stock sugerido (70 %).</strong> Si tiene en inventario hasta este valor, en los seis meses de prueba se cubrió la demanda de 7 de cada 10 productos (72 % medido). Es un nivel máximo de abastecimiento, no una predicción exacta: normalmente queda por encima de lo que se vende y, para los productos con muy baja probabilidad de venta, es casi cero.
+      <strong>Monto esperado:</strong> lo que se espera vender (probabilidad de venta × lo que vende cuando se vende). <strong>Stock sugerido:</strong> para Comprar más y Mantener, el nivel de servicio del 70 %; para No reponer, 0; para Revisar, el monto estimado. Con esta regla, en los seis meses de prueba se cubrió la demanda de 7 de cada 10 productos (70 % medido). Es un máximo, no una predicción exacta.
     </div>
 
     <div class="toolbar">
       <input type="text" id="search-input" placeholder="Buscar por código o nombre…" oninput="filterProducts()">
       <span id="grupo-chip" class="badge blue" style="display:none;cursor:pointer;" onclick="limpiarGrupo()" title="Quitar el filtro de grupo"></span>
-      <select id="filter-decision" onchange="filterProducts()">
-        <option value="">Todas las decisiones</option>
-        <option value="Reforzar stock">Reforzar stock</option>
-        <option value="Mantener stock">Mantener stock</option>
-        <option value="Reducir stock">Reducir stock</option>
-        <option value="Sin recomendación (estimación por promedio)">Sin recomendación (estimación por promedio)</option>
-      </select>
-      <select id="filter-venta" onchange="filterProducts()">
-        <option value="">Todos (se venderá o no)</option>
-        <option value="Sí">Se venderá</option>
-        <option value="No">No se venderá</option>
+      <select id="filter-accion" onchange="filterProducts()">
+        <option value="">Todas las acciones</option>
       </select>
       <select id="sort-by" onchange="filterProducts()">
-        <option value="prob">Ordenar: probabilidad</option>
         <option value="venta_prob">Ordenar: probabilidad de venta</option>
-        <option value="ventas">Ordenar: ventas predichas</option>
+        <option value="ventas">Ordenar: monto esperado</option>
         <option value="stock">Ordenar: stock sugerido</option>
         <option value="codigo">Ordenar: código</option>
       </select>
@@ -477,16 +479,14 @@
         <table>
           <thead><tr>
             <th>Código</th><th>Descripción</th>
-            <th>Ventas <small style="font-size:9px;font-weight:400">mes base</small></th>
-            <th>Predicción <small id="th-mes" style="font-size:9px;font-weight:400"></small></th>
-            <th>Variación</th>
-            <th style="white-space:normal;line-height:1.25;min-width:72px;" title="Nivel de abastecimiento que cubrió la demanda de 7 de cada 10 productos en los meses de prueba">Stock sugerido (70 %)</th>
-            <th>Prob. crecimiento</th>
-            <th title="Probabilidad de venta">Prob. de venta</th><th>Se venderá</th>
-            <th>Decisión</th><th>Seg.</th>
+            <th>Ventas <small style="font-size:9px;font-weight:400">mes anterior</small></th>
+            <th>Monto esperado <small id="th-mes" style="font-size:9px;font-weight:400"></small></th>
+            <th title="Comprar más y Mantener: cubrió la demanda de 7 de cada 10 productos en los meses de prueba. No reponer: 0. Revisar: el monto estimado">Stock sugerido</th>
+            <th title="Probabilidad de que el producto se venda el mes predicho">Prob. de venta</th>
+            <th>Acción</th>
           </tr></thead>
           <tbody id="products-body">
-            <tr><td colspan="11" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
+            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);">Ejecuta el modelo para ver los resultados</td></tr>
           </tbody>
         </table>
       </div>
@@ -589,7 +589,8 @@
 
 <script>
 // ── Estado ─────────────────────────────────────────────────────────────────
-let _page = 1, _query = '', _decision = '', _venta = '', _sortBy = 'prob', _grupo = '';
+let _page = 1, _query = '', _accion = '', _sortBy = 'venta_prob', _grupo = '';
+let _accCatalogo = [];
 let _gruposData = [];
 let _polling = null, _selectedFile = null;
 let _chartHist = null, _chartDonut = null, _chartDetail = null;
@@ -617,7 +618,7 @@ function nav(btn, id) {
   document.getElementById('page-' + id).classList.add('active');
   btn.classList.add('active');
   if (id === 'resumen')   loadSummary();
-  if (id === 'productos') { _page = 1; if (!_irAProductosDeGrupo) _grupo = ''; _irAProductosDeGrupo = false; actualizarChipGrupo(); loadProducts(); }
+  if (id === 'productos') { _page = 1; if (!_irAProductosDeGrupo) _grupo = ''; _irAProductosDeGrupo = false; actualizarChipGrupo(); asegurarCatalogoAcciones().then(loadProducts); }
   if (id === 'grupos')    loadGrupos();
   if (id === 'estados')   { _estPage = 1; loadEstados(); }
 }
@@ -626,6 +627,8 @@ function nav(btn, id) {
 let _irAProductosDeGrupo = false;
 
 async function loadGrupos() {
+  await asegurarCatalogoAcciones();
+  leyendaAcciones();
   const d = await apiGet('/api/grupos');
   if (!d.ok) return;
   _gruposData = d.data || [];
@@ -647,13 +650,27 @@ function renderGrupos() {
     <tr onclick="verProductosDeGrupo(${i})" title="Ver los productos de este grupo">
       <td class="desc">${g.grupo}</td>
       <td>${fmt(g.productos)}</td>
-      <td>${fmt(g.se_vendera)} <span style="color:var(--muted);font-size:11px">de ${fmt(g.productos)}</span></td>
+      <td>${accionesGrupoHtml(g)}</td>
       <td>${COP(g.prediccion)}</td>
       <td>${COP(g.mes_anterior)}</td>
       <td>${g.variacion != null ? deltaHtml(g.variacion * 100) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${pc(g.pct_total * 100, 1)}</td>
       <td>${g.stock_sugerido != null ? COP(g.stock_sugerido) : '<span style="color:var(--muted)">—</span>'}</td>
     </tr>`).join('');
+}
+
+// Cuántos productos del grupo hay en cada acción: una píldora por acción con
+// el color de la leyenda de arriba de la tabla.
+function accionesGrupoHtml(g) {
+  if (g.comprar_mas == null) return `${fmt(g.se_vendera)} <span style="color:var(--muted);font-size:11px">se venderán</span>`;
+  const partes = _accCatalogo.filter(a => g[a.clave] > 0)
+    .map(a => `<span class="badge ${ACCION_COLOR[a.clave]}" title="${esc(a.nombre)}">${fmt(g[a.clave])}</span>`);
+  return partes.length ? `<span class="acc-pildoras">${partes.join('')}</span>` : '<span style="color:var(--muted)">—</span>';
+}
+
+function leyendaAcciones() {
+  document.getElementById('grupos-leyenda').innerHTML = 'Acciones:' + _accCatalogo.map(a =>
+    `<span class="badge ${ACCION_COLOR[a.clave]}">${esc(a.nombre)}</span>`).join('');
 }
 
 function verProductosDeGrupo(i) {
@@ -810,36 +827,28 @@ async function loadSummary() {
   document.getElementById('resumen-content').style.display = 'block';
 
   document.getElementById('mes-banner-text').textContent = `Predicción para ${d.mes_predicho} — basada en datos hasta el mes anterior`;
-  document.getElementById('kpi-total').textContent    = fmt(d.total);
-  document.getElementById('kpi-reforzar').textContent = fmt(d.reforzar);
-  document.getElementById('kpi-mantener').textContent = fmt(d.mantener);
-  document.getElementById('kpi-reducir').textContent  = fmt(d.reducir);
-  document.getElementById('kpi-pred').textContent     = COP(d.pred_total);
-  document.getElementById('kpi-sinrec').textContent   = fmt(d.n_promedio || 0);
-  if (d.n_se_vendera != null) {
-    document.getElementById('kpi-venta').textContent = `${fmt(d.n_se_vendera)} de ${fmt(d.n_con_prob_venta)}`;
-    document.getElementById('kpi-venta-sub').textContent =
-      `productos · umbral ${nEs(d.sale_threshold || 0, 2)}` +
-      (d.sale_test_accuracy != null ? ` · acierto en la prueba interna ${pc(d.sale_test_accuracy * 100, 1)}` : '');
-  } else {
-    document.getElementById('kpi-venta').textContent = '—';
-    document.getElementById('kpi-venta-sub').textContent = 'Sin probabilidad de venta en estos resultados';
-  }
-
-  const pctRef = d.total ? Math.round(d.reforzar / d.total * 100) : 0;
-  const pctMan = d.total ? Math.round(d.mantener / d.total * 100) : 0;
-  const pctRed = d.total ? Math.round(d.reducir  / d.total * 100) : 0;
-  document.getElementById('kpi-reforzar-pct').textContent = pc(pctRef) + ' del total analizado';
-  document.getElementById('kpi-mantener-pct').textContent = pc(pctMan) + ' del total analizado';
-  document.getElementById('kpi-reducir-pct').textContent  = pc(pctRed) + ' del total analizado';
+  if (d.acciones_catalogo) _accCatalogo = d.acciones_catalogo;
+  const acc = d.acciones || {};
+  const nTotal = Object.values(acc).reduce((a, b) => a + b, 0);
+  document.getElementById('kpi-total').textContent = fmt(nTotal);
+  document.getElementById('kpi-total-sub').textContent = d.n_se_vendera != null
+    ? `${fmt(d.n_se_vendera)} probablemente se venderán` : '—';
+  _accCatalogo.forEach(a => {
+    const n = acc[a.clave] || 0;
+    document.getElementById('kpi-acc-' + a.clave).textContent = fmt(n);
+    if (a.clave !== 'por_promedio')
+      document.getElementById('kpi-acc-' + a.clave + '-pct').textContent =
+        nTotal ? pc(Math.round(n / nTotal * 100)) + ' de los productos' : '—';
+  });
+  document.getElementById('kpi-pred').textContent = COP(d.pred_total);
   const nProm = d.n_promedio || 0;
-  const wTxt  = d.blend_weight != null ? ` (${pc(d.blend_weight * 100)} modelo)` : '';
   document.getElementById('kpi-variacion').textContent =
-    `Modelo combinado${wTxt}: ${COP(d.pred_total_modelo)} (${fmt(d.con_pred_modelo)} productos)` +
-    ` · Estimación por promedio: ${COP(d.pred_total_promedio)} (${fmt(nProm)} productos)`;
+    `Modelo ${COP(d.pred_total_modelo)} · Por promedio ${COP(d.pred_total_promedio)}`;
+  document.getElementById('kpi-variacion').title =
+    `${fmt(d.con_pred_modelo)} productos del modelo y ${fmt(nProm)} por promedio`;
 
   renderHistChart(d.historial, d.pred_total, d.mes_predicho);
-  renderDonut(d.reforzar, d.mantener, d.reducir);
+  renderDonut(acc);
   renderMetricas(d.metricas, d);
   renderTopRisk(d.top_risk);
   renderTopGrowth(d.top_growth);
@@ -872,7 +881,7 @@ function renderHistChart(historial, pred_total, mes_predicho) {
           pointRadius: 3, pointBackgroundColor: '#1A1916',
         },
         {
-          label: 'Predicción (modelo combinado + estimación por promedio)',
+          label: 'Venta esperada',
           data: predData,
           borderColor: '#1D4ED8',
           backgroundColor: 'rgba(29,78,216,.1)',
@@ -897,33 +906,26 @@ function renderHistChart(historial, pred_total, mes_predicho) {
   });
 }
 
-function renderDonut(reforzar, mantener, reducir) {
+function renderDonut(acc) {
   if (_chartDonut) _chartDonut.destroy();
-  const total = reforzar + mantener + reducir;
+  const items = _accCatalogo.map(a => ({ nombre: a.nombre, n: acc[a.clave] || 0, color: ACCION_HEX[a.clave] }));
+  const total = items.reduce((t, i) => t + i.n, 0) || 1;
   _chartDonut = new Chart(document.getElementById('chart-donut'), {
     type: 'doughnut',
     data: {
-      labels: ['Reforzar stock', 'Mantener stock', 'Reducir stock'],
-      datasets: [{ data: [reforzar, mantener, reducir], backgroundColor: ['#0F6E56', '#D3D1C7', '#A32D2D'], borderWidth: 0, hoverOffset: 4 }]
+      labels: items.map(i => i.nombre),
+      datasets: [{ data: items.map(i => i.n), backgroundColor: items.map(i => i.color), borderWidth: 0, hoverOffset: 4 }]
     },
     options: {
       responsive: true, maintainAspectRatio: false, cutout: '72%',
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${fmt(ctx.raw)} (${pc(ctx.raw / total * 100)})` } } }
     }
   });
-  document.getElementById('donut-legend').innerHTML = `
+  document.getElementById('donut-legend').innerHTML = items.map(i => `
     <div style="display:flex;align-items:center;gap:8px;">
-      <span style="width:10px;height:10px;border-radius:2px;background:#0F6E56;flex-shrink:0;"></span>
-      <span>Reforzar — <strong>${fmt(reforzar)}</strong> <span style="color:var(--muted)">(${pc(reforzar/total*100)})</span></span>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="width:10px;height:10px;border-radius:2px;background:#D3D1C7;flex-shrink:0;"></span>
-      <span>Mantener — <strong>${fmt(mantener)}</strong> <span style="color:var(--muted)">(${pc(mantener/total*100)})</span></span>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="width:10px;height:10px;border-radius:2px;background:#A32D2D;flex-shrink:0;"></span>
-      <span>Reducir — <strong>${fmt(reducir)}</strong> <span style="color:var(--muted)">(${pc(reducir/total*100)})</span></span>
-    </div>`;
+      <span style="width:10px;height:10px;border-radius:2px;background:${i.color};flex-shrink:0;"></span>
+      <span>${esc(i.nombre)} — <strong>${fmt(i.n)}</strong> <span style="color:var(--muted)">(${pc(i.n / total * 100)})</span></span>
+    </div>`).join('');
 }
 
 function renderMetricas(m, d) {
@@ -941,63 +943,89 @@ function renderMetricas(m, d) {
     </div>`).join('');
 }
 
-function renderTopRisk(rows) {
-  document.getElementById('top-risk-body').innerHTML = rows.map(r => `
-    <tr onclick="openDetail('${r.CODIGO}')">
-      <td class="codigo">${r.CODIGO}</td>
-      <td class="desc" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
+function filaResumen(r) {
+  return `
+    <tr data-codigo="${esc(r.CODIGO)}" onclick="openDetail(this.dataset.codigo)">
+      <td class="codigo">${esc(r.CODIGO)}</td>
+      <td class="desc" title="${esc(r.DESCRIPCION)}">${esc(r.DESCRIPCION)}</td>
       <td>${COP(r.ventas_base)}</td>
-      <td>${COP(r.ventas_predichas)}</td>
+      <td>${montoHtml(r)}</td>
       <td>${stockHtml(r)}</td>
-      <td>
-        <div class="prob-wrap">
-          <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_reduccion*100)}%;background:var(--red)"></div></div>
-          <span class="prob-val">${pc(r.prob_reduccion*100)}</span>
-        </div>
-      </td>
-      <td>${decisionBadge(r.decision)}</td>
-      <td>${probVentaHtml(r)}</td>
-      <td>${ventaBadge(r.se_vendera, true)}</td>
-    </tr>`).join('');
+      <td>${probVentaBarra(r)}</td>
+      <td>${accionBadge(r)}</td>
+    </tr>`;
+}
+
+const SIN_FILAS = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">Ningún producto en esta acción</td></tr>';
+
+function renderTopRisk(rows) {
+  document.getElementById('top-risk-body').innerHTML = rows.length ? rows.map(filaResumen).join('') : SIN_FILAS;
 }
 
 function renderTopGrowth(rows) {
-  document.getElementById('top-growth-body').innerHTML = rows.map(r => `
-    <tr onclick="openDetail('${r.CODIGO}')">
-      <td class="codigo">${r.CODIGO}</td>
-      <td class="desc" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
-      <td>${COP(r.ventas_base)}</td>
-      <td>${COP(r.ventas_predichas)}</td>
-      <td>${stockHtml(r)}</td>
-      <td>
-        <div class="prob-wrap">
-          <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_crecimiento*100)}%"></div></div>
-          <span class="prob-val">${pc(r.prob_crecimiento*100)}</span>
-        </div>
-      </td>
-      <td>${decisionBadge(r.decision)}</td>
-      <td>${probVentaHtml(r)}</td>
-      <td>${ventaBadge(r.se_vendera, true)}</td>
-    </tr>`).join('');
+  document.getElementById('top-growth-body').innerHTML = rows.length ? rows.map(filaResumen).join('') : SIN_FILAS;
+}
+
+// ── Acción única ─────────────────────────────────────────────────────────────
+// Solo colores e iconos viven aquí; nombres y explicaciones vienen de la API.
+const ACCION_COLOR = { comprar_mas: 'green', mantener: 'blue', no_reponer: 'red', revisar: 'amber', por_promedio: 'gray' };
+const ACCION_HEX   = { comprar_mas: '#0F6E56', mantener: '#1D4ED8', no_reponer: '#A32D2D', revisar: '#EF9F27', por_promedio: '#D3D1C7' };
+const ACCION_ICONO = { comprar_mas: '↑ ', no_reponer: '↓ ' };
+
+async function asegurarCatalogoAcciones() {
+  if (!_accCatalogo.length) {
+    const d = await apiGet('/api/summary');
+    if (d.acciones_catalogo) _accCatalogo = d.acciones_catalogo;
+  }
+  const sel = document.getElementById('filter-accion');
+  if (sel.options.length <= 1 && _accCatalogo.length) {
+    sel.innerHTML = '<option value="">Todas las acciones</option>' +
+      _accCatalogo.map(a => `<option value="${esc(a.clave)}">${esc(a.nombre)}</option>`).join('');
+    sel.value = _accion;
+  }
+}
+
+function accionBadge(r) {
+  if (!r.accion) return r.decision ? decisionBadge(r.decision) : '<span style="color:var(--muted)">—</span>';
+  return `<span class="badge ${ACCION_COLOR[r.accion] || 'gray'}">${ACCION_ICONO[r.accion] || ''}${esc(r.accion_nombre || r.accion)}</span>`;
+}
+
+// Monto según la acción: No reponer -> sin venta esperada; Revisar -> rango;
+// Por promedio con venta poco probable -> sin monto; resto -> venta esperada.
+function montoHtml(r) {
+  if (!r.accion) return COP(r.ventas_predichas);
+  if (r.accion === 'no_reponer') return '<span style="color:var(--muted)">Sin venta esperada</span>';
+  if (r.monto_mostrado == null) return '<span style="color:var(--muted)">—</span>';
+  if (r.monto_rango) return `Entre $0 y ${COP(r.monto_si_vende)}<div class="monto-nota">si se vende</div>`;
+  if (r.accion === 'por_promedio' && !(r.monto_mostrado > 0)) return '<span style="color:var(--muted)">Venta poco probable</span>';
+  return COP(r.monto_mostrado);
+}
+
+function montoTexto(r) {
+  if (!r.accion) return COP(r.ventas_predichas);
+  if (r.accion === 'no_reponer') return 'Sin venta esperada';
+  if (r.monto_mostrado == null) return '—';
+  if (r.monto_rango) return `Entre $0 y ${COP(r.monto_si_vende)} si se vende`;
+  if (r.accion === 'por_promedio' && !(r.monto_mostrado > 0)) return 'Venta poco probable';
+  return COP(r.monto_mostrado);
+}
+
+function probVentaBarra(r) {
+  if (r.prob_venta == null) return '<span style="color:var(--muted)">—</span>';
+  const v = Math.round(r.prob_venta * 100);
+  return `<div class="prob-wrap">
+    <div class="prob-bar"><div class="prob-fill" style="width:${v}%"></div></div>
+    <span class="prob-val">${pc(v)}</span>
+  </div>`;
 }
 
 function stockHtml(r) {
+  if (r.accion === 'no_reponer') return '<span style="font-weight:600">$0</span>';
   if (r.stock_sugerido == null) return '<span style="color:var(--muted)">—</span>';
   const u = r.stock_sugerido_unidades != null
     ? `<div style="font-size:10px;color:var(--muted)">${fmt(r.stock_sugerido_unidades)} uds</div>` : '';
   const monto = r.stock_sugerido > 0 ? COP(r.stock_sugerido) : '$0';
   return `<span style="font-weight:600">${monto}</span>${u}`;
-}
-
-function probVentaHtml(r) {
-  if (r.prob_venta == null || r.se_vendera == null) return '<span style="color:var(--muted)">—</span>';
-  return `<span class="prob-val" style="font-weight:600">${pc(r.prob_venta*100)}</span>`;
-}
-
-function ventaBadge(v, corto) {
-  if (v === 'Sí') return `<span class="badge green">${corto ? 'Sí' : 'Se venderá: Sí'}</span>`;
-  if (v === 'No') return `<span class="badge gray">${corto ? 'No' : 'Se venderá: No'}</span>`;
-  return '<span style="color:var(--muted)">—</span>';
 }
 
 function decisionBadge(d) {
@@ -1010,8 +1038,7 @@ function decisionBadge(d) {
 // ── Productos ────────────────────────────────────────────────────────────────
 function filterProducts() {
   _query    = document.getElementById('search-input').value;
-  _decision = document.getElementById('filter-decision').value;
-  _venta    = document.getElementById('filter-venta').value;
+  _accion   = document.getElementById('filter-accion').value;
   _sortBy   = document.getElementById('sort-by').value;
   _page = 1;
   loadProducts();
@@ -1022,7 +1049,7 @@ function changePage(dir) {
 }
 
 async function loadProducts() {
-  const params = new URLSearchParams({ q: _query, decision: _decision, venta: _venta, grupo: _grupo, page: _page, size: 50, sort: _sortBy });
+  const params = new URLSearchParams({ q: _query, accion: _accion, grupo: _grupo, page: _page, size: 50, sort: _sortBy });
   const d = await apiGet('/api/products?' + params);
   if (!d.ok) return;
 
@@ -1039,43 +1066,27 @@ async function loadProducts() {
 
   const tbody = document.getElementById('products-body');
   if (!d.data || !d.data.length) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);">Sin resultados</td></tr>';
     return;
   }
 
-  tbody.innerHTML = d.data.map(r => {
-    const base  = r.ventas_base || 0;
-    const pred  = r.ventas_predichas || 0;
-    const varia = base > 0 && pred > 0 ? ((pred - base) / base * 100) : null;
-    return `
-    <tr onclick="openDetail('${r.CODIGO}')">
-      <td class="codigo">${r.CODIGO}</td>
-      <td class="desc" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
-      <td>${COP(base)}</td>
-      <td>${COP(pred)}</td>
-      <td>${varia != null ? deltaHtml(varia) : '<span style="color:var(--muted)">—</span>'}</td>
+  tbody.innerHTML = d.data.map(r => `
+    <tr data-codigo="${esc(r.CODIGO)}" onclick="openDetail(this.dataset.codigo)">
+      <td class="codigo">${esc(r.CODIGO)}</td>
+      <td class="desc" title="${esc(r.DESCRIPCION)}">${esc(r.DESCRIPCION)}</td>
+      <td>${COP(r.ventas_base || 0)}</td>
+      <td>${montoHtml(r)}</td>
       <td>${stockHtml(r)}</td>
-      <td>
-        ${r.origen_estimacion === 'promedio'
-          ? '<span style="color:var(--muted)" title="Estimación por promedio de los últimos 3 meses">—</span>'
-          : `<div class="prob-wrap">
-          <div class="prob-bar"><div class="prob-fill" style="width:${Math.round(r.prob_crecimiento*100)}%"></div></div>
-          <span class="prob-val">${pc(r.prob_crecimiento*100)}</span>
-        </div>`}
-      </td>
-      <td>${probVentaHtml(r)}</td>
-      <td>${ventaBadge(r.se_vendera, true)}</td>
-      <td>${decisionBadge(r.decision)}</td>
-      <td><span class="badge gray">${r.cluster}</span></td>
-    </tr>`;
-  }).join('');
+      <td>${probVentaBarra(r)}</td>
+      <td>${accionBadge(r)}</td>
+    </tr>`).join('');
 }
 
 // ── Estado de todos los productos ────────────────────────────────────────────
 // Solo el color de cada estado vive aquí; nombres y explicaciones vienen de la API.
 const ESTADO_COLOR = {
   recomendacion_monto: 'green', solo_recomendacion: 'blue', monto_promedio: 'amber',
-  venta_ocasional: 'gray', sin_ventas_recientes: 'red',
+  producto_nuevo: 'violet', venta_ocasional: 'gray', sin_ventas_recientes: 'red',
 };
 const MESES_CORTOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 let _estPage = 1, _estado = '', _estNombres = {};
@@ -1103,11 +1114,12 @@ function pcParte(f) {
 }
 
 function prediccionHtml(r) {
-  if (!r.decision && r.ventas_predichas == null) return '<span style="color:var(--muted)">—</span>';
-  const monto = r.ventas_predichas != null
-    ? `<div style="font-size:11px;margin-top:3px">${COP(r.ventas_predichas)}</div>`
-    : '<div style="font-size:10px;color:var(--muted);margin-top:3px">sin monto</div>';
-  return (r.decision ? decisionBadge(r.decision) : '') + monto;
+  if (!r.accion && !r.decision && r.ventas_predichas == null) return '<span style="color:var(--muted)">—</span>';
+  const sinMonto = r.accion ? (r.monto_mostrado == null && r.accion !== 'no_reponer') : r.ventas_predichas == null;
+  const monto = sinMonto
+    ? '<div style="font-size:10px;color:var(--muted);margin-top:3px">sin monto</div>'
+    : `<div style="font-size:11px;margin-top:3px">${montoHtml(r)}</div>`;
+  return accionBadge(r) + monto;
 }
 
 function estadoBadge(clave) {
@@ -1135,7 +1147,7 @@ async function loadEstados() {
     `De los <strong>${fmt(d.total_productos)}</strong> productos vendidos en los últimos dos años, ` +
     `<strong>${fmt(d.con_prediccion)}</strong> tienen predicción este mes` +
     (d.mes_predicho ? ` (${esc(d.mes_predicho)})` : '') + '. ' +
-    'Los demás se venden muy de vez en cuando o dejaron de venderse; abajo puede ver cuáles son.';
+    'Los demás son nuevos, se venden muy de vez en cuando o dejaron de venderse.';
 
   _estNombres = {};
   d.estados.forEach(e => { _estNombres[e.clave] = e.nombre; });
@@ -1145,7 +1157,7 @@ async function loadEstados() {
     d.estados.map(e => `<option value="${esc(e.clave)}">${esc(e.nombre)}</option>`).join('');
   sel.value = _estado;
 
-  const borde = { green: 'green', blue: 'blue', amber: 'amber', red: 'red', gray: '' };
+  const borde = { green: 'green', blue: 'blue', amber: 'amber', red: 'red', violet: 'violet', gray: '' };
   document.getElementById('estados-cards').innerHTML = d.estados.map(e => `
     <div class="kpi estado-card ${borde[ESTADO_COLOR[e.clave]] || ''}" data-estado="${esc(e.clave)}"
          onclick="elegirEstado(this.dataset.estado)" title="Ver los productos en este estado">
@@ -1232,54 +1244,53 @@ async function openDetail(codigo) {
   const esProm  = p.origen_estimacion === 'promedio';
   const prob    = Math.round((p.prob_crecimiento || 0) * 100);
   const base    = p.ventas_base || 0;
-  const pred    = p.ventas_predichas || 0;
-  const predRf  = pred > 0 && p.ventas_predichas_rf != null ? p.ventas_predichas_rf : null;
+  const conAcc  = !!p.accion;
+  // Valor del punto del gráfico: el monto que se muestra (sin punto si no hay
+  // venta esperada o si es un rango).
+  const pred    = conAcc ? ((p.monto_mostrado > 0 && !p.monto_rango) ? p.monto_mostrado : 0)
+                         : (p.ventas_predichas || 0);
   const varia   = base > 0 && pred > 0 ? ((pred - base) / base * 100) : null;
+  const unidades = p.accion === 'no_reponer' ? 0 : p.stock_sugerido_unidades;
+  const stockTxt = p.accion === 'no_reponer' ? '$0' : (p.stock_sugerido != null ? (p.stock_sugerido > 0 ? COP(p.stock_sugerido) : '$0') : '—');
+  const detalle = esProm
+    ? ['Estimación por promedio de los últimos 3 meses', `Segmento <strong>${esc(p.cluster)}</strong>`]
+    : [`Prob. crecimiento <strong>${pc(prob)}</strong>`,
+       `Variación frente al mes anterior <strong>${varia != null ? pct2(varia) : '—'}</strong>`,
+       `Segmento <strong>${esc(p.cluster)}</strong>`];
 
   document.getElementById('detail-content').innerHTML = `
     <div style="margin-bottom:6px;">
-      ${decisionBadge(p.decision)}
+      ${accionBadge(p)}
       <span style="font-size:11px;color:var(--muted);margin-left:8px;">Predicción para ${d.mes_predicho}</span>
     </div>
-    <h2 style="font-size:15px;font-weight:600;margin-bottom:2px;">${d.descripcion}</h2>
-    <p style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:20px;">${d.codigo}</p>
-
-    ${p.stock_sugerido != null ? `
-    <div class="card" style="margin-bottom:16px;padding:12px 14px;font-size:13px;line-height:1.5;">
-      <div class="kpi-label">Stock sugerido (70 %)</div>
-      <div style="font-size:17px;font-weight:600;">${COP(p.stock_sugerido)}${p.stock_sugerido_unidades != null ? ` <span style="font-size:12px;font-weight:400;color:var(--muted)">· ${fmt(p.stock_sugerido_unidades)} unidades</span>` : ''}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:3px;">Si tiene en inventario hasta este valor, en los meses de prueba se cubrió la demanda de 7 de cada 10 productos.</div>
-    </div>` : ''}
+    <h2 style="font-size:15px;font-weight:600;margin-bottom:2px;">${esc(d.descripcion)}</h2>
+    <p style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:${p.accion_explicacion ? 6 : 20}px;">${esc(d.codigo)}</p>
+    ${p.accion_explicacion ? `<p style="font-size:13px;margin-bottom:18px;">${esc(p.accion_explicacion)}</p>` : ''}
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px;">
       <div class="kpi blue" style="padding:12px 14px;">
-        <div class="kpi-label">Ventas base</div>
-        <div class="kpi-value" style="font-size:17px;">${COP(base)}</div>
-        <div class="kpi-sub">último mes</div>
+        <div class="kpi-label">Ventas mes anterior</div>
+        <div class="kpi-value" style="font-size:17px;">${COP(base) === '—' ? '$0' : COP(base)}</div>
+        <div class="kpi-sub">último mes con datos</div>
       </div>
-      <div class="kpi ${pred >= base ? 'green' : 'red'}" style="padding:12px 14px;">
-        <div class="kpi-label">Predicción ${d.mes_predicho}</div>
-        <div class="kpi-value" style="font-size:17px;">${COP(pred)}</div>
-        <div class="kpi-sub">${varia != null ? deltaHtml(varia) : '—'}</div>
-        ${predRf != null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;">Solo modelo: ${COP(predRf)}</div>` : ''}
+      <div class="kpi ${ACCION_COLOR[p.accion] === 'red' ? 'red' : 'green'}" style="padding:12px 14px;">
+        <div class="kpi-label">Monto esperado ${d.mes_predicho}</div>
+        <div class="kpi-value" style="font-size:17px;">${montoTexto(p)}</div>
+        <div class="kpi-sub">${p.accion === 'no_reponer' ? 'es poco probable que se venda' : 'probabilidad de venta × lo que vende cuando se vende'}</div>
       </div>
       <div class="kpi amber" style="padding:12px 14px;">
-        ${esProm
-          ? `<div class="kpi-label">Estimación</div>
-        <div class="kpi-value" style="font-size:13px;line-height:1.3;">Estimación por promedio de los últimos 3 meses</div>
-        <div class="kpi-sub">Sin probabilidad · Segmento ${p.cluster}</div>`
-          : `<div class="kpi-label">Prob. crecimiento</div>
-        <div class="kpi-value" style="font-size:17px;">${pc(prob)}</div>
-        <div class="kpi-sub">Segmento ${p.cluster}</div>`}
+        <div class="kpi-label">Stock sugerido</div>
+        <div class="kpi-value" style="font-size:17px;">${stockTxt}</div>
+        <div class="kpi-sub">${unidades != null && p.stock_sugerido != null ? fmt(unidades) + ' unidades' : '—'}</div>
       </div>
     </div>
 
-    ${p.prob_venta != null && p.se_vendera != null ? `
-    <div style="display:flex;align-items:center;gap:12px;margin:-8px 0 22px;font-size:13px;">
+    ${p.prob_venta != null ? `
+    <div style="display:flex;align-items:center;gap:12px;margin:-8px 0 14px;font-size:13px;">
       <span style="color:var(--muted)">Probabilidad de venta</span>
-      <strong>${pc(p.prob_venta * 100)}</strong>
-      ${ventaBadge(p.se_vendera)}
+      <div style="width:160px">${probVentaBarra(p)}</div>
     </div>` : ''}
+    <div class="mas-detalle">${detalle.map(t => `<span>${t}</span>`).join('')}</div>
 
     <div class="section-title" style="margin-bottom:8px;">Historial de ventas</div>
     <div style="position:relative;height:220px;margin-bottom:22px;">
@@ -1299,8 +1310,8 @@ async function openDetail(codigo) {
             </tr>`).join('')}
           <tr style="background:var(--accent-bg);">
             <td style="font-size:12px;font-weight:600;color:var(--accent);">${d.mes_predicho} ★</td>
-            <td style="font-weight:600;color:var(--accent);">${COP(pred)}</td>
-            <td colspan="2" style="font-size:12px;color:var(--accent);">${esProm ? 'Estimación por promedio de los últimos 3 meses' : 'Predicción (modelo combinado)'}</td>
+            <td style="font-weight:600;color:var(--accent);">${conAcc ? montoTexto(p) : COP(pred)}</td>
+            <td colspan="2" style="font-size:12px;color:var(--accent);">${conAcc ? esc(p.accion_nombre) : (esProm ? 'Estimación por promedio de los últimos 3 meses' : 'Predicción (modelo combinado)')}</td>
           </tr>
         </tbody>
       </table>
@@ -1320,7 +1331,7 @@ async function openDetail(codigo) {
       labels: fechas,
       datasets: [
         { label: 'Ventas reales', data: [...reales, null], borderColor: '#1A1916', tension: .3, pointRadius: 4, pointBackgroundColor: '#1A1916', fill: false },
-        { label: esProm ? 'Estimación por promedio' : 'Predicción (modelo combinado)', data: predArr, borderColor: '#1D4ED8', borderDash: [5,3], tension: 0, pointRadius: 7, pointBackgroundColor: '#1D4ED8', fill: false, spanGaps: false }
+        { label: conAcc ? 'Monto esperado' : (esProm ? 'Estimación por promedio' : 'Predicción (modelo combinado)'), data: predArr, borderColor: '#1D4ED8', borderDash: [5,3], tension: 0, pointRadius: 7, pointBackgroundColor: '#1D4ED8', fill: false, spanGaps: false }
       ]
     },
     options: {

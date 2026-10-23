@@ -34,6 +34,31 @@ def _resultados():
     })
 
 
+class ResumenGruposConAccionTest(unittest.TestCase):
+    """Con la acción única: la predicción del grupo es la suma de la venta
+    esperada y se cuentan los productos por acción."""
+
+    def setUp(self):
+        r = _resultados().assign(
+            accion=["comprar_mas", "no_reponer", "mantener", "mantener",
+                    "por_promedio", "por_promedio"],
+            venta_esperada=[110.0, 90.0, 50.0, np.nan, 20.0, 5.0])
+        self.t = gr.resumen_grupos(r, MAPA, "CODIGO", "TOTAL_VENDIDO").set_index("grupo")
+
+    def test_prediccion_es_la_venta_esperada(self):
+        self.assertEqual(self.t.loc["FRENOS", "prediccion"], 200.0)
+        self.assertEqual(self.t.loc["ACEITES", "prediccion"], 50.0)
+        self.assertAlmostEqual(self.t["pct_total"].sum(), 1.0)
+
+    def test_cuenta_por_accion(self):
+        self.assertEqual(self.t.loc["FRENOS", "comprar_mas"], 1)
+        self.assertEqual(self.t.loc["FRENOS", "no_reponer"], 1)
+        self.assertEqual(self.t.loc["FRENOS", "mantener"], 0)
+        self.assertEqual(self.t.loc["ACEITES", "mantener"], 1)   # D no tiene monto
+        self.assertEqual(self.t.loc["Sin grupo", "por_promedio"], 2)
+        self.assertEqual(self.t.loc["Sin grupo", "revisar"], 0)
+
+
 class ResumenGruposTest(unittest.TestCase):
     def setUp(self):
         self.t = gr.resumen_grupos(_resultados(), MAPA, "CODIGO",

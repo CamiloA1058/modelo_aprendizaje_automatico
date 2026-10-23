@@ -266,7 +266,10 @@ def resumen_grupos(resultados, mapa, id_col, total_col):
     mismos productos, variacion (fraccion; NaN sin ventas previas) y fraccion
     del total predicho. Los codigos sin grupo van en "Sin grupo". Si
     'resultados' trae stock_sugerido, se agrega la columna stock_sugerido (suma
-    del stock sugerido de los productos del grupo). No modifica
+    del stock sugerido de los productos del grupo). Con la accion unica
+    (columnas accion y venta_esperada) la prediccion del grupo es la suma de la
+    venta esperada (prob_venta x monto si se vende) y se agrega una columna por
+    accion con cuantos productos del grupo la tienen. No modifica
     'resultados'."""
     r = resultados[resultados["ventas_predichas"].notna()]
     if len(r) == 0:
@@ -277,9 +280,10 @@ def resumen_grupos(resultados, mapa, id_col, total_col):
         vende = (r["se_vendera"] == "Sí").astype(int)
     else:
         vende = pd.Series(0, index=r.index)
+    con_accion = "accion" in r.columns and "venta_esperada" in r.columns
+    pred = r["venta_esperada" if con_accion else "ventas_predichas"].astype(float)
     g = pd.DataFrame({
-        "grupo": grupo, "n": 1, "vende": vende,
-        "pred": r["ventas_predichas"].astype(float),
+        "grupo": grupo, "n": 1, "vende": vende, "pred": pred,
         "previo": r[total_col].astype(float),
     }).groupby("grupo").sum()
     total = g["pred"].sum()
@@ -297,4 +301,10 @@ def resumen_grupos(resultados, mapa, id_col, total_col):
     if "stock_sugerido" in r.columns:
         out["stock_sugerido"] = (r["stock_sugerido"].astype(float).groupby(grupo)
                                  .sum().reindex(g.index).to_numpy(float))
+    if con_accion:
+        from ventas_forecast.accion import ACCIONES
+        cuenta = pd.crosstab(grupo, r["accion"]).reindex(index=g.index, fill_value=0)
+        for clave in ACCIONES:
+            out[clave] = (cuenta[clave].to_numpy(int) if clave in cuenta.columns
+                          else np.zeros(len(out), int))
     return out.sort_values("prediccion", ascending=False, kind="stable").reset_index(drop=True)

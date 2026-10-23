@@ -134,8 +134,10 @@ class ProbVentaApiTest(unittest.TestCase):
 
     def test_pagina_ofrece_columna_kpi_y_filtro(self):
         html = self.client.get("/").get_data(as_text=True)
-        for texto in ("Probablemente se venderán", "Probabilidad de venta",
-                      "Se venderá: Sí", "No se venderá", 'id="filter-venta"'):
+        # La columna "Se venderá" y su filtro se reemplazaron por la acción;
+        # la probabilidad de venta sigue como barra y en la tarjeta de total.
+        for texto in ("probablemente se venderán", "Probabilidad de venta",
+                      "Prob. de venta", "probVentaBarra", 'id="filter-accion"'):
             self.assertIn(texto, html)
 
 

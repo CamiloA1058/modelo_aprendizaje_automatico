@@ -27,6 +27,7 @@ DEFAULT_OUTPUT = DEFAULT_PREDICTION
 
 # ── Importar modelo ───────────────────────────────────────────────────────────
 from ventas_forecast.model import SalesForecastModel, ETIQUETA_SIN_RECOMENDACION
+from ventas_forecast import accion as accion_mod
 from ventas_forecast import grupos as grupos_mod
 from ventas_forecast import estado_productos as estado_mod
 from ventas_forecast import fuente_bd
@@ -88,6 +89,13 @@ def _msg_ultima_venta(fecha_max, ventana):
         return (f"  → Última venta: {fecha_max:%d/%m/%Y} (su mes está incompleto y no "
                 f"se usa: es el mes que se predice)")
     return f"  → Última venta: {fecha_max:%d/%m/%Y}"
+
+
+def _msg_acciones(model):
+    """Cuántos productos quedan en cada acción."""
+    cuenta = model.results["accion"].value_counts()
+    return "  → " + " | ".join(f"{v['nombre']}: {fmt_es(int(cuenta.get(k, 0)))}"
+                               for k, v in accion_mod.ACCIONES.items())
 
 
 def _msg_estados(tabla):
@@ -154,6 +162,8 @@ def _run_model(filepath, col_map, params, config_bd=None):
             stock_sugerido=str(
                 params.get("stock_sugerido", "true")).lower() != "false",
             nivel_servicio=float(params.get("nivel_servicio", 0.70)),
+            accion_unica=str(
+                params.get("accion_unica", "true")).lower() != "false",
         )
 
         _log("✔ Cargando y limpiando datos…")
@@ -195,6 +205,12 @@ def _run_model(filepath, col_map, params, config_bd=None):
         if model.stock_sugerido:
             _log("✔ Calculando el stock sugerido de cada producto…")
             model.agregar_stock_sugerido()
+
+        if model.accion_unica and model.probabilidad_venta:
+            _log("✔ Eligiendo la acción de cada producto…")
+            model.agregar_accion()
+            if "accion" in model.results.columns:
+                _log(_msg_acciones(model))
 
         if model.resumen_por_grupo:
             _log("✔ Sumando las predicciones por grupo de producto…")
@@ -247,12 +263,16 @@ def api_bd_estado():
 
 
 STOCK_COLS = ("stock_sugerido", "stock_sugerido_unidades")
+# Columnas sin dato para los productos sin monto: null en el JSON (no 0).
+NULL_COLS = (*STOCK_COLS, "monto_mostrado", "monto_si_vende", "venta_esperada")
+ACCION_COLS = ("accion", "accion_nombre", "monto_mostrado", "monto_rango",
+               "monto_si_vende", "venta_esperada")
 
 
 def _stock_nan_a_none(registros):
-    """Los productos sin monto no tienen stock sugerido: null en el JSON (no 0)."""
+    """Los productos sin monto no tienen stock ni monto: null en el JSON (no 0)."""
     for r in registros:
-        for k in STOCK_COLS:
+        for k in NULL_COLS:
             v = r.get(k)
             if isinstance(v, float) and np.isnan(v):
                 r[k] = None
@@ -260,8 +280,9 @@ def _stock_nan_a_none(registros):
 
 
 def _fillna_sin_stock(df):
-    """fillna(0) que deja en NaN las columnas de stock sugerido."""
-    return df.fillna({c: 0 for c in df.columns if c not in STOCK_COLS})
+    """fillna(0) que deja en NaN las columnas de stock y de monto (NULL_COLS)."""
+    return df.fillna({c: 0 for c in df.columns
+                      if c not in NULL_COLS and df[c].dtype != object})
 
 
 @app.route("/api/run", methods=["POST"])
@@ -317,6 +338,11 @@ def api_summary():
     n_prom   = int(es_prom.sum())
 
     total     = len(df_mod)
+    tiene_accion = "accion" in df.columns
+    acciones = None
+    if tiene_accion:
+        cuenta = df["accion"].value_counts()
+        acciones = {k: int(cuenta.get(k, 0)) for k in accion_mod.ACCIONES}
     reforzar  = int((df_mod["decision"] == "Reforzar stock").sum())
     reducir   = int((df_mod["decision"] == "Reducir stock").sum())
     mantener  = total - reforzar - reducir
@@ -327,12 +353,14 @@ def api_summary():
     pred_col   = "ventas_predichas"
     df_con_pred = df[df[pred_col].notna()]
     mod_con_pred = df_con_pred[~_es_promedio(df_con_pred)]
-    # pred_total_modelo: suma de la predicción combinada (w*modelo + (1-w)*media
-    # de 3 meses) de los productos del modelo; pred_total_promedio: suma de la
-    # media de 3 meses de los productos sin ventas el último mes;
-    # pred_total: ambas; pred_total_rf: el modelo solo, que subestima el total.
-    pred_total_modelo   = float(mod_con_pred[pred_col].sum()) if len(mod_con_pred) else 0.0
-    pred_total_promedio = float(df[es_prom][pred_col].sum()) if n_prom else 0.0
+    # Con la acción única el total es la venta esperada (prob_venta x monto si
+    # se vende) de TODOS los productos con monto, sea cual sea su acción. Sin
+    # ella: la predicción combinada (w*modelo + (1-w)*media de 3 meses).
+    # pred_total_modelo / pred_total_promedio: la composición del total;
+    # pred_total_rf: el modelo solo, que subestima el total.
+    col_total = "venta_esperada" if "venta_esperada" in df.columns else pred_col
+    pred_total_modelo   = float(mod_con_pred[col_total].sum()) if len(mod_con_pred) else 0.0
+    pred_total_promedio = float(df[es_prom][col_total].sum()) if n_prom else 0.0
     pred_total     = pred_total_modelo + pred_total_promedio
     pred_total_rf  = (float(mod_con_pred["ventas_predichas_rf"].sum())
                       if "ventas_predichas_rf" in mod_con_pred.columns else pred_total_modelo)
@@ -362,13 +390,25 @@ def api_summary():
     cols_pred = ([pred_col]
                  + (["ventas_predichas_rf"] if "ventas_predichas_rf" in df.columns else [])
                  + (["prob_venta", "se_vendera"] if tiene_venta else [])
-                 + [k for k in STOCK_COLS if k in df.columns])
+                 + [k for k in STOCK_COLS if k in df.columns]
+                 + [k for k in ACCION_COLS if k in df.columns])
     df = df_mod
+
+    # Con acción: "Comprar más" con más confianza y "No reponer este mes" que
+    # más vendieron el mes pasado. Sin acción: por probabilidad de crecer /
+    # de reducir.
+    if tiene_accion:
+        df_top = df[df["accion"] == "comprar_mas"]
+        df_risk = df[df["accion"] == "no_reponer"]
+        orden_risk = (c("total_sold"), False)
+    else:
+        df_top = df_risk = df
+        orden_risk = ("prob_reduccion", False)
 
     # Top productos por probabilidad de crecimiento
     top = (
-        df[[c("id"), c("description"), "prob_crecimiento",
-            *cols_pred, c("total_sold"), "decision", "cluster"]]
+        df_top[[c("id"), c("description"), "prob_crecimiento",
+                *cols_pred, c("total_sold"), "decision", "cluster"]]
         .sort_values("prob_crecimiento", ascending=False)
         .head(20)
         .pipe(_fillna_sin_stock)
@@ -383,9 +423,9 @@ def api_summary():
 
     # Top productos con mayor probabilidad de reducción
     top_risk = (
-        df[[c("id"), c("description"), "prob_reduccion",
-            *cols_pred, c("total_sold"), "decision", "cluster"]]
-        .sort_values("prob_reduccion", ascending=False)
+        df_risk[[c("id"), c("description"), "prob_reduccion",
+                 *cols_pred, c("total_sold"), "decision", "cluster"]]
+        .sort_values(orden_risk[0], ascending=orden_risk[1])
         .head(20)
         .pipe(_fillna_sin_stock)
         .rename(columns={
@@ -425,6 +465,11 @@ def api_summary():
         "top_growth":  top,
         "top_risk":    top_risk,
         "estados":     _conteo_estados(model),
+        "acciones":    acciones,
+        "acciones_catalogo": accion_mod.catalogo(),
+        "umbral_reforzar": getattr(model, "umbral_reforzar", None),
+        "s_baja":      getattr(model, "s_baja", None),
+        "regla_stock": getattr(model, "regla_stock", None),
     })
 
 
@@ -440,6 +485,7 @@ def api_products():
     q        = request.args.get("q", "").upper()
     grupo    = request.args.get("grupo", "")
     dec      = request.args.get("decision", "")
+    accion   = request.args.get("accion", "")
     page     = int(request.args.get("page", 1))
     size     = int(request.args.get("size", 50))
     sort_by  = request.args.get("sort", "prob")   # prob | ventas | codigo | venta_prob
@@ -471,12 +517,15 @@ def api_products():
         ]
     if dec:
         out = out[out["decision"] == dec]
+    if accion and "accion" in out.columns:
+        out = out[out["accion"] == accion]
     if venta and "se_vendera" in out.columns:
         out = out[out["se_vendera"] == venta]
 
     sort_map = {
         "prob":   ("prob_crecimiento", False),
-        "ventas": ("ventas_predichas", False),
+        "ventas": ("monto_mostrado" if "monto_mostrado" in out.columns
+                   else "ventas_predichas", False),
         "codigo": ("CODIGO", True),
         "venta_prob": ("prob_venta", False),
         "stock":  ("stock_sugerido", False),
@@ -619,10 +668,9 @@ COLUMNAS_CSV_ESTADOS = {
     "meses_sin_venta":         "Meses desde la última venta",
     "ventas_12m":              "Ventas últimos 12 meses (COP)",
     "promedio_mensual":        "Promedio mensual (COP)",
-    "decision":                "Decisión",
-    "ventas_predichas":        "Monto estimado (COP)",
+    "accion_nombre":           "Acción",
+    "monto_mostrado":          "Monto esperado (COP)",
     "prob_venta":              "Probabilidad de venta",
-    "se_vendera":              "Se venderá",
     "stock_sugerido":          "Stock sugerido (COP)",
     "stock_sugerido_unidades": "Stock sugerido (unidades)",
 }
@@ -638,7 +686,7 @@ def api_estados_descargar():
     cols = [k for k in COLUMNAS_CSV_ESTADOS if k in out.columns]
     out = out[cols].rename(columns=COLUMNAS_CSV_ESTADOS)
     for col in ("Ventas últimos 12 meses (COP)", "Promedio mensual (COP)",
-                "Monto estimado (COP)", "Stock sugerido (COP)"):
+                "Monto esperado (COP)", "Stock sugerido (COP)"):
         if col in out.columns:
             out[col] = out[col].astype(float).round(0).astype("Int64")
     if "Probabilidad de venta" in out.columns:
@@ -674,7 +722,7 @@ def api_product(codigo):
     hist["fecha"] = hist["fecha"].astype(str)
 
     pred = pred_row.iloc[0].to_dict()
-    pred = {k: ((None if k in STOCK_COLS else 0)
+    pred = {k: ((None if k in NULL_COLS else 0)
                 if (isinstance(v, float) and np.isnan(v)) else v)
             for k, v in pred.items()}
     pred.setdefault("origen_estimacion", "modelo")
@@ -685,6 +733,8 @@ def api_product(codigo):
     # El panel de detalle lee las ventas del último mes como `ventas_base`,
     # igual que las tablas del resumen.
     pred["ventas_base"] = pred.get(c("total_sold"), 0)
+    if pred.get("accion") in accion_mod.ACCIONES:
+        pred["accion_explicacion"] = accion_mod.ACCIONES[pred["accion"]]["explicacion"]
 
     return jsonify({
         "ok":          True,

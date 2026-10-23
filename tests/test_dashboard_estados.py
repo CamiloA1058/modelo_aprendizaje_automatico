@@ -38,6 +38,11 @@ def _tabla():
         "se_vendera": ["Sí", "No", "Sí", None, None, None],
         "stock_sugerido": [90.0, np.nan, 20.0, np.nan, np.nan, np.nan],
         "stock_sugerido_unidades": [3.0, np.nan, 1.0, np.nan, np.nan, np.nan],
+        "accion": ["comprar_mas", "no_reponer", "por_promedio", None, None, None],
+        "accion_nombre": ["Comprar más", "No reponer este mes", "Por promedio",
+                          None, None, None],
+        "monto_mostrado": [63.0, np.nan, 9.0, np.nan, np.nan, np.nan],
+        "monto_rango": [False, False, False, None, None, None],
     })
 
 
@@ -105,7 +110,7 @@ class EstadosApiTest(unittest.TestCase):
         d = self.client.get("/api/summary").get_json()
         self.assertEqual(d["estados"], {
             "recomendacion_monto": 1, "solo_recomendacion": 1, "monto_promedio": 1,
-            "venta_ocasional": 2, "sin_ventas_recientes": 1})
+            "producto_nuevo": 0, "venta_ocasional": 2, "sin_ventas_recientes": 1})
 
     # ── Lista ────────────────────────────────────────────────────────────────
     def _lista(self, **params):
@@ -168,6 +173,10 @@ class EstadosApiTest(unittest.TestCase):
         self.assertEqual(df.loc[2, "Promedio mensual (COP)"], 11)
         self.assertEqual(df.loc[0, "Ventas últimos 12 meses (COP)"], 600)
         self.assertAlmostEqual(df.loc[0, "Probabilidad de venta"], 0.9)
+        self.assertEqual(df.loc[0, "Acción"], "Comprar más")
+        self.assertEqual(df.loc[0, "Monto esperado (COP)"], 63)
+        self.assertNotIn("Decisión", df.columns)
+        self.assertNotIn("Se venderá", df.columns)
 
 
 if __name__ == "__main__":

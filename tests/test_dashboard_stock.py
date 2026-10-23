@@ -109,13 +109,14 @@ class StockApiTest(unittest.TestCase):
 
     def test_pagina_trae_columna_y_nota(self):
         html = self.client.get("/").get_data(as_text=True)
-        self.assertIn("Stock sugerido (70 %)", html)
+        self.assertIn("Stock sugerido", html)
+        self.assertIn("el nivel de servicio del 70 %; para No reponer, 0", html)
         self.assertIn("se cubrió la demanda de 7 de cada 10 productos", html)
 
     def test_nota_con_la_cobertura_medida(self):
-        # experimento_stock_sugerido.txt: cobertura agrupada 71,8 %
+        # Estudio de caso con el stock por acción: cobertura agrupada 69,6 %
         html = self.client.get("/").get_data(as_text=True)
-        self.assertIn("7 de cada 10 productos (72 % medido)", html)
+        self.assertIn("7 de cada 10 productos (70 % medido)", html)
 
     def test_sin_columnas_todo_sigue_igual(self):
         sin = _resultados(self.c, con_stock=False)

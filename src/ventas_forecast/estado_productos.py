@@ -2,20 +2,22 @@
 estado_productos.py
 ===================
 Estado de TODOS los productos de los datos, no solo de los que reciben
-predicción. Cada producto cae en exactamente uno de cinco estados:
+predicción. Cada producto cae en exactamente uno de seis estados:
 
 - recomendacion_monto : el modelo da una decisión y un monto estimado.
 - solo_recomendacion  : decisión del modelo sin monto (fuera de los top
                         productos del regresor).
 - monto_promedio      : monto por la media de los últimos 3 meses, sin
                         decisión (no vendió el último mes).
-- venta_ocasional     : menos de min_months meses con ventas.
+- producto_nuevo      : menos de min_months meses con ventas y la primera venta
+                        dentro de los últimos min_months meses.
+- venta_ocasional     : menos de min_months meses con ventas (el resto).
 - sin_ventas_recientes: min_months o más meses con ventas, pero sin una venta
                         reciente que lo deje en alguno de los estados
                         anteriores.
 
 Los tres primeros salen de los resultados del modelo (lo que muestra el
-dashboard); los dos últimos, del historial. Los nombres y las explicaciones
+dashboard); los otros tres, del historial. Los nombres y las explicaciones
 para el cliente viven solo en ESTADOS para poder cambiarlos sin tocar la vista.
 """
 
@@ -41,6 +43,11 @@ ESTADOS = {
         "explicacion": ("No vendió el último mes; se estima con su promedio "
                         "reciente, sin recomendación."),
     },
+    "producto_nuevo": {
+        "nombre": "Producto nuevo",
+        "explicacion": ("Empezó a venderse hace poco; todavía no hay historia "
+                        "suficiente para predecir. Vigile sus ventas."),
+    },
     "venta_ocasional": {
         "nombre": "Venta ocasional",
         "explicacion": ("Vendió en menos de {min_months} meses de los últimos dos "
@@ -58,8 +65,12 @@ ESTADOS = {
 ESTADOS_CON_PREDICCION = ("recomendacion_monto", "solo_recomendacion", "monto_promedio")
 
 # Columnas que se copian de los resultados del modelo (NaN si no aplican).
-COLUMNAS_PREDICCION = ("decision", "ventas_predichas", "prob_venta", "se_vendera",
-                       "stock_sugerido", "stock_sugerido_unidades")
+COLUMNAS_PREDICCION = ("decision", "accion", "accion_nombre", "ventas_predichas",
+                       "monto_mostrado", "monto_rango", "monto_si_vende", "venta_esperada",
+                       "prob_venta", "se_vendera", "stock_sugerido",
+                       "stock_sugerido_unidades")
+# Columnas de texto o lógicas: None (no NaN) si no aplican.
+_COLUMNAS_OBJETO = ("decision", "accion", "accion_nombre", "monto_rango", "se_vendera")
 
 
 def explicacion(clave, min_months):
@@ -68,7 +79,7 @@ def explicacion(clave, min_months):
 
 
 def catalogo(min_months):
-    """Lista ordenada de {clave, nombre, explicacion} de los cinco estados."""
+    """Lista ordenada de {clave, nombre, explicacion} de los seis estados."""
     return [{"clave": k, "nombre": v["nombre"], "explicacion": explicacion(k, min_months)}
             for k, v in ESTADOS.items()]
 
@@ -93,7 +104,8 @@ def clasificar(historia, resultados, *, id_col, desc_col, total_col, ultimo_mes,
                 con predicción: con monto y decisión, solo decisión (monto
                 NaN) o monto por promedio (origen_estimacion == "promedio").
     Columnas: id, descripción, grupo (solo con mapa_grupos), estado (clave),
-    estado_nombre, meses_con_venta, ultimo_mes_venta ("AAAA-MM"),
+    estado_nombre, meses_con_venta, primer_mes_venta y ultimo_mes_venta
+    ("AAAA-MM"),
     meses_sin_venta (meses desde la última venta; 0 = vendió el último mes),
     ventas_12m (pesos de los 12 meses que terminan en ultimo_mes),
     promedio_mensual (pesos por mes con ventas) y COLUMNAS_PREDICCION.
@@ -109,12 +121,14 @@ def clasificar(historia, resultados, *, id_col, desc_col, total_col, ultimo_mes,
     por_prod = con_venta.groupby(id_col)
     meses = por_prod["fecha"].count().reindex(base.index).fillna(0).astype(int)
     ultima = por_prod["fecha"].max().reindex(base.index)
+    primera = por_prod["fecha"].min().reindex(base.index)
     suma = por_prod[total_col].sum().reindex(base.index).fillna(0.0)
     desde_12 = ultimo_mes - pd.DateOffset(months=11)
     v12 = (h[h["fecha"] >= desde_12].groupby(id_col)[total_col].sum()
            .reindex(base.index).fillna(0.0))
 
     t["meses_con_venta"] = meses
+    t["primer_mes_venta"] = primera.dt.strftime("%Y-%m")
     t["ultimo_mes_venta"] = ultima.dt.strftime("%Y-%m")
     t["meses_sin_venta"] = _meses_entre(ultima, ultimo_mes).astype("Int64")
     t["ventas_12m"] = v12.astype(float)
@@ -127,9 +141,14 @@ def clasificar(historia, resultados, *, id_col, desc_col, total_col, ultimo_mes,
         if res is not None and col in res.columns:
             t[col] = res[col].reindex(t.index)
         else:
-            t[col] = np.nan if col not in ("decision", "se_vendera") else None
+            t[col] = None if col in _COLUMNAS_OBJETO else np.nan
 
-    estado = np.where(meses < min_months, "venta_ocasional", "sin_ventas_recientes")
+    # Producto nuevo: la primera venta está a menos de min_months meses del
+    # último mes (p. ej. con 6: vendió por primera vez en los últimos 6 meses).
+    nuevo = (_meses_entre(primera, ultimo_mes) < min_months).to_numpy()
+    estado = np.where(meses < min_months,
+                      np.where(nuevo, "producto_nuevo", "venta_ocasional"),
+                      "sin_ventas_recientes")
     estado = pd.Series(estado, index=t.index, dtype=object)
     if res is not None:
         en_res = t.index.isin(res.index)
@@ -148,7 +167,8 @@ def clasificar(historia, resultados, *, id_col, desc_col, total_col, ultimo_mes,
         t["grupo"] = g.where(g != grupos.SIN_GRUPO, grupos.ETIQUETA_SIN_GRUPO)
 
     orden = [id_col, desc_col, *(["grupo"] if "grupo" in t.columns else []),
-             "estado", "estado_nombre", "meses_con_venta", "ultimo_mes_venta",
+             "estado", "estado_nombre", "meses_con_venta", "primer_mes_venta",
+             "ultimo_mes_venta",
              "meses_sin_venta", "ventas_12m", "promedio_mensual", *COLUMNAS_PREDICCION]
     return t[orden].reset_index(drop=True)
 

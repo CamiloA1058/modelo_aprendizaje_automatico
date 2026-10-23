@@ -1,10 +1,12 @@
 """Estado de TODOS los productos de los datos (no solo los que reciben
-predicción): cinco estados disjuntos cuya suma es el total de productos.
+predicción): seis estados disjuntos cuya suma es el total de productos.
 
 - Con recomendación y monto: decisión del modelo y monto estimado.
 - Solo recomendación: decisión del modelo sin monto (fuera de los top).
 - Monto por promedio: monto por la media de 3 meses, sin decisión.
-- Venta ocasional: menos de min_months meses con ventas.
+- Producto nuevo: menos de min_months meses con ventas y la primera venta
+  dentro de los últimos min_months meses.
+- Venta ocasional: menos de min_months meses con ventas (el resto).
 - Sin ventas recientes: min_months o más meses con ventas, pero sin una venta
   reciente que lo deje en los estados anteriores.
 """
@@ -56,10 +58,11 @@ VENTAS = {
     "A": _todos(1000.0),                                 # recomendación y monto
     "B": _todos(200.0),                                  # solo recomendación
     "C": {**_todos(300.0, 0, 21)},                       # promedio (0 en 22 y 23)
-    "D": {21: 100.0, 22: 100.0, 23: 100.0},              # ocasional, vendió el último mes
+    "D": {21: 100.0, 22: 100.0, 23: 100.0},              # nuevo: empezó hace 3 meses
     "E": _todos(500.0, 8, 17),                           # sin ventas recientes (6 meses sin)
     "F": _todos(50.0, 0, 5),                             # exactamente 6 meses: sin ventas recientes
     "G": _todos(70.0, 0, 4),                             # 5 meses: ocasional
+    "H": {2: 80.0, 23: 80.0},                            # ocasional que vendió el último mes
 }
 
 RESULTADOS = pd.DataFrame({
@@ -84,13 +87,16 @@ def _clasificar(min_months=6, resultados=RESULTADOS, mapa=None, ventas=VENTAS):
 
 
 class CatalogoEstadosTest(unittest.TestCase):
-    def test_cinco_estados_en_orden_con_nombre_y_explicacion(self):
+    def test_seis_estados_en_orden_con_nombre_y_explicacion(self):
         cat = ep.catalogo(6)
         self.assertEqual([e["clave"] for e in cat], list(ep.ESTADOS))
         self.assertEqual(
             [e["nombre"] for e in cat],
             ["Con recomendación y monto", "Solo recomendación", "Monto por promedio",
-             "Venta ocasional", "Sin ventas recientes"])
+             "Producto nuevo", "Venta ocasional", "Sin ventas recientes"])
+        self.assertEqual(ep.explicacion("producto_nuevo", 6),
+                         "Empezó a venderse hace poco; todavía no hay historia suficiente "
+                         "para predecir. Vigile sus ventas.")
         for e in cat:
             self.assertTrue(e["explicacion"].strip())
 
@@ -107,24 +113,36 @@ class ClasificarTest(unittest.TestCase):
     def test_un_estado_por_producto(self):
         self.assertEqual(self.por["estado"].to_dict(), {
             "A": "recomendacion_monto", "B": "solo_recomendacion",
-            "C": "monto_promedio", "D": "venta_ocasional",
+            "C": "monto_promedio", "D": "producto_nuevo",
             "E": "sin_ventas_recientes", "F": "sin_ventas_recientes",
-            "G": "venta_ocasional",
+            "G": "venta_ocasional", "H": "venta_ocasional",
         })
 
     def test_particion_disjunta_que_suma_todos_los_productos(self):
-        self.assertEqual(len(self.t), 7)
+        self.assertEqual(len(self.t), 8)
         self.assertFalse(self.t["CODIGO"].duplicated().any())
         self.assertTrue(set(self.t["estado"]) <= set(ep.ESTADOS))
-        self.assertEqual(int(self.t["estado"].value_counts().sum()), 7)
+        self.assertEqual(int(self.t["estado"].value_counts().sum()), 8)
 
     def test_nombre_del_estado_sale_del_catalogo(self):
         for _, f in self.t.iterrows():
             self.assertEqual(f["estado_nombre"], ep.ESTADOS[f["estado"]]["nombre"])
 
-    def test_vendio_el_ultimo_mes_con_pocos_meses_es_ocasional(self):
-        self.assertEqual(self.por.loc["D", "estado"], "venta_ocasional")
+    def test_empezo_a_venderse_hace_poco_es_producto_nuevo(self):
+        self.assertEqual(self.por.loc["D", "estado"], "producto_nuevo")
+        self.assertEqual(self.por.loc["D", "primer_mes_venta"], "2025-10")
         self.assertEqual(self.por.loc["D", "meses_sin_venta"], 0)
+
+    def test_vendio_el_ultimo_mes_con_pocos_meses_y_primera_venta_antigua_es_ocasional(self):
+        self.assertEqual(self.por.loc["H", "estado"], "venta_ocasional")
+        self.assertEqual(self.por.loc["H", "primer_mes_venta"], "2024-03")
+        self.assertEqual(self.por.loc["H", "meses_sin_venta"], 0)
+
+    def test_primera_venta_justo_min_months_atras_ya_no_es_nueva(self):
+        ventas = {"N": {18: 10.0, 23: 10.0}, "M": {17: 10.0, 23: 10.0}}
+        t = _clasificar(resultados=None, ventas=ventas).set_index("CODIGO")
+        self.assertEqual(t.loc["N", "estado"], "producto_nuevo")   # hace 5 meses
+        self.assertEqual(t.loc["M", "estado"], "venta_ocasional")  # hace 6 meses
 
     def test_exactamente_min_months_no_es_ocasional(self):
         self.assertEqual(self.por.loc["F", "meses_con_venta"], 6)
@@ -175,12 +193,12 @@ class ClasificarTest(unittest.TestCase):
     def test_resultados_duplicados_no_duplican_productos(self):
         r = pd.concat([RESULTADOS, RESULTADOS.iloc[[0]]])
         t = _clasificar(resultados=r)
-        self.assertEqual(len(t), 7)
+        self.assertEqual(len(t), 8)
 
     def test_sin_resultados_todos_quedan_fuera_de_prediccion(self):
         t = _clasificar(resultados=None).set_index("CODIGO")
         self.assertEqual(t.loc["A", "estado"], "sin_ventas_recientes")
-        self.assertEqual(t.loc["D", "estado"], "venta_ocasional")
+        self.assertEqual(t.loc["D", "estado"], "producto_nuevo")
 
     def test_grupo_con_catalogo(self):
         mapa = gr.cargar_mapa(io.StringIO("codigo;id_grupo;grupo\nA;1;FRENOS\nB;2;\n"))
@@ -197,29 +215,43 @@ class ClasificarTest(unittest.TestCase):
         self.assertEqual([f["clave"] for f in r], list(ep.ESTADOS))
         n = {f["clave"]: f["productos"] for f in r}
         self.assertEqual(n, {"recomendacion_monto": 1, "solo_recomendacion": 1,
-                             "monto_promedio": 1, "venta_ocasional": 2,
-                             "sin_ventas_recientes": 2})
+                             "monto_promedio": 1, "producto_nuevo": 1,
+                             "venta_ocasional": 2, "sin_ventas_recientes": 2})
         self.assertAlmostEqual(sum(f["pct_productos"] for f in r), 1.0)
         self.assertAlmostEqual(sum(f["pct_ventas_12m"] for f in r), 1.0)
         rec = r[0]
         self.assertAlmostEqual(rec["ventas_12m"], 12000.0)
-        self.assertAlmostEqual(rec["pct_productos"], 1 / 7)
+        self.assertAlmostEqual(rec["pct_productos"], 1 / 8)
+
+    def test_copia_la_accion_y_el_monto_mostrado(self):
+        r = RESULTADOS.assign(
+            accion=["comprar_mas", "no_reponer", "por_promedio"],
+            accion_nombre=["Comprar más", "No reponer este mes", "Por promedio"],
+            monto_mostrado=[990.0, np.nan, 0.0], monto_rango=[False, False, False],
+            monto_si_vende=[1100.0, np.nan, 300.0], venta_esperada=[990.0, np.nan, 180.0])
+        t = _clasificar(resultados=r).set_index("CODIGO")
+        self.assertEqual(t.loc["A", "accion"], "comprar_mas")
+        self.assertEqual(t.loc["B", "accion_nombre"], "No reponer este mes")
+        self.assertAlmostEqual(t.loc["A", "monto_mostrado"], 990.0)
+        self.assertAlmostEqual(t.loc["C", "venta_esperada"], 180.0)
+        self.assertTrue(pd.isna(t.loc["D", "accion"]))
+        self.assertTrue(np.isnan(t.loc["D", "monto_mostrado"]))
 
 
 # ── Con el modelo entrenado (datos sintéticos) ──────────────────────────────
 N_MONTHS = 12
 # 0: vendió todo el año, el de menos ventas -> fuera de los top: solo recomendación
-# 1: 5 meses con ventas (7-11), vendió el último mes -> venta ocasional
+# 1: 5 meses con ventas (7-11), empezó hace 5 meses -> producto nuevo
 # 2: exactamente 6 meses con ventas (6-11) -> con recomendación y monto
 # 3: sin ventas el último mes ni en el 8 -> monto por promedio
 # 4: sin ventas en los 3 últimos meses -> sin ventas recientes
-# 5: solo 2 meses con ventas (9 y 10) -> venta ocasional
+# 5: solo 2 meses con ventas (9 y 10), empezó hace 3 meses -> producto nuevo
 # 6, 7: vendieron todo el año -> con recomendación y monto
 DROP = {1: range(0, 7), 2: range(0, 6), 3: [8, 11], 4: [9, 10, 11],
         5: [*range(0, 9), 11]}
-ESPERADO = {0: "solo_recomendacion", 1: "venta_ocasional",
+ESPERADO = {0: "solo_recomendacion", 1: "producto_nuevo",
             2: "recomendacion_monto", 3: "monto_promedio",
-            4: "sin_ventas_recientes", 5: "venta_ocasional",
+            4: "sin_ventas_recientes", 5: "producto_nuevo",
             6: "recomendacion_monto", 7: "recomendacion_monto"}
 
 
@@ -281,8 +313,8 @@ class ClasificarConModeloTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             m = _entrenado(tmp, min_months=5)
             t = m.estado_productos.set_index(m._c("id"))
-            self.assertNotEqual(t.loc[1, "estado"], "venta_ocasional")
-            self.assertEqual(t.loc[5, "estado"], "venta_ocasional")
+            self.assertNotIn(t.loc[1, "estado"], ("venta_ocasional", "producto_nuevo"))
+            self.assertEqual(t.loc[5, "estado"], "producto_nuevo")
 
 
 class RunLlamaClasificacionTest(unittest.TestCase):
@@ -291,7 +323,7 @@ class RunLlamaClasificacionTest(unittest.TestCase):
         pasos = ["load_and_clean", "build_features", "cluster", "prepare_split",
                  "train_classifier", "train_regressor", "predict_next_month",
                  "estimar_por_promedio", "agregar_probabilidad_venta",
-                 "agregar_stock_sugerido", "agregar_resumen_grupo",
+                 "agregar_stock_sugerido", "agregar_accion", "agregar_resumen_grupo",
                  "clasificar_estado_productos", "plot"]
         m = SalesForecastModel(filepath="unused.csv")
         with mock.patch.multiple(
@@ -303,7 +335,10 @@ class RunLlamaClasificacionTest(unittest.TestCase):
         self.assertGreater(orden.index("clasificar_estado_productos"),
                            orden.index("estimar_por_promedio"))
         self.assertGreater(orden.index("clasificar_estado_productos"),
+                           orden.index("agregar_accion"))
+        self.assertGreater(orden.index("agregar_accion"),
                            orden.index("agregar_stock_sugerido"))
+        self.assertLess(orden.index("agregar_accion"), orden.index("agregar_resumen_grupo"))
 
 
 # ── Datos reales (opcional: VENTAS_PRUEBA_DATOS_REALES=1, ~1-2 min) ──────────
@@ -320,8 +355,8 @@ class DatosRealesTest(unittest.TestCase):
         t = m.estado_productos
         conteo = t["estado"].value_counts().to_dict()
         self.assertEqual(conteo, {"recomendacion_monto": 645, "solo_recomendacion": 52,
-                                  "monto_promedio": 348, "venta_ocasional": 2260,
-                                  "sin_ventas_recientes": 279})
+                                  "monto_promedio": 348, "producto_nuevo": 441,
+                                  "venta_ocasional": 1819, "sin_ventas_recientes": 279})
         self.assertEqual(len(t), 3584)
         self.assertFalse(t[m._c("id")].duplicated().any())
 
