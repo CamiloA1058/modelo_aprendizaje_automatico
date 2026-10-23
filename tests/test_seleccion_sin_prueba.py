@@ -5,6 +5,8 @@ Ninguna seleccion usa los datos sobre los que se reporta.
   venta y los cuantiles del stock sugerido se eligen con una validacion interna
   temporal DENTRO de la particion de entrenamiento (ultimo ~20 % de los meses
   de entrenamiento de cada producto).
+- El umbral t de Reforzar, s_baja (No reponer), el monto si se vende y la
+  regla de stock por accion tambien se eligen con esa validacion interna.
 - La particion de prueba interna (ultimo 20 % de los meses de cada producto)
   solo se usa para reportar: si se cambian sus objetivos, ninguna seleccion
   cambia.
@@ -266,6 +268,70 @@ class StockSinPruebaTest(unittest.TestCase):
         for alfa in a["q"]:
             np.testing.assert_allclose(a["q"][alfa], b["q"][alfa], rtol=1e-9)
             self.assertAlmostEqual(a["global"][alfa], b["global"][alfa], places=9)
+
+
+class AccionSinPruebaTest(unittest.TestCase):
+    """t de Reforzar, s_baja, el monto si se vende y la regla de stock se
+    eligen con la validacion interna: cambiar las etiquetas y objetivos de la
+    prueba interna (clasificador de 3 clases, regresor y modelo de venta) o las
+    ventas del mes predicho (holdout, que el modelo nunca ve) no los cambia."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def _modelo(self, perturbar=False):
+        m = _preparado(self._tmp.name, n_products=8, n_months=14, drop=DROP)
+        if perturbar:
+            te = m._test_idx
+            m._y.loc[te] = (m._y.loc[te] + 1) % 3
+            m._df_train.loc[te, "target"] = m._df_train.loc[te, "target"] * 100.0
+        m.train_classifier()
+        m.train_regressor()
+        m.predict_next_month()
+        m.estimar_por_promedio()
+        real = tk.sp.sale_train_frame
+
+        def invertida(*a, **kw):
+            frame, tr, te = real(*a, **kw)
+            if perturbar:
+                t = frame.loc[te, "target"]
+                frame.loc[te, "target"] = np.where(t > 0, 0.0, 1000.0)
+                frame.loc[te, "vende"] = (frame.loc[te, "target"] > 0).astype(int)
+            return frame, tr, te
+
+        with mock.patch.object(tk.sp, "sale_train_frame", invertida):
+            m.agregar_probabilidad_venta()
+        m.agregar_stock_sugerido()
+        m.agregar_accion()
+        return m
+
+    def test_selecciones_no_cambian_con_la_prueba_interna(self):
+        base = self._modelo()
+        otro = self._modelo(perturbar=True)
+        self.assertIsNotNone(base.umbral_reforzar)
+        self.assertEqual(otro.umbral_reforzar, base.umbral_reforzar)
+        self.assertEqual(otro.regla_umbral_reforzar, base.regla_umbral_reforzar)
+        self.assertEqual(otro.sale_threshold, base.sale_threshold)
+        self.assertEqual(otro.s_baja, base.s_baja)
+        self.assertEqual(otro.monto_si_vende_clave, base.monto_si_vende_clave)
+        a, b = base.regla_stock, otro.regla_stock
+        self.assertEqual(a["adoptada"], b["adoptada"])
+        self.assertEqual(a["n"], b["n"])
+        for k in ("cobertura_nivel", "cobertura_regla", "stock_real_nivel", "stock_real_regla"):
+            self.assertAlmostEqual(a[k], b[k], places=9)
+        # Lo reportado si cambia: la prueba interna es solo para reportar.
+        self.assertNotEqual(otro.metrics, base.metrics)
+
+    def test_validacion_del_clasificador_sin_filas_de_prueba(self):
+        m = self._modelo()
+        c = m._c
+        v = m._clf_validacion
+        self.assertGreater(len(v), 0)
+        self.assertFalse(set(v.index) & set(m._test_idx))
+        self.assertTrue(set(v.index) <= set(m._train_idx))
+        prueba = _llaves(m._df_train.loc[m._test_idx], c("id"))
+        self.assertFalse(set(zip(v["id"], pd.to_datetime(v["fecha"]))) & prueba)
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
 )
 
+from ventas_forecast import accion as ac
 from ventas_forecast import eligibility as el
 from ventas_forecast import estado_productos as ep
 from ventas_forecast import grupos
@@ -81,6 +82,14 @@ DEFAULT_CLF_PARAMS = {
     "min_samples_leaf": 3,
 }
 
+# Pesos de clase del clasificador de 3 clases. "balanced_subsample" (pesos
+# por muestra bootstrap de cada arbol) junto con las variables de
+# regularidad del modelo de venta (sale_probability.NEW_FEATURES) es la
+# variante C + D elegida con la validacion interna del primer origen del
+# estudio de caso (mayor precision promedio de Reforzar sin bajar el F1
+# macro); ver CHANGELOG "Acción única".
+CLF_CLASS_WEIGHT = "balanced_subsample"
+
 # Hiperparámetros fijos del regresor (RandomForestRegressor sobre log1p) y del
 # clasificador binario de venta; los usan los modelos de producción y los
 # modelos temporales de la validación interna.
@@ -94,6 +103,17 @@ DEFAULT_PARAM_GRID = {
     "rf__max_depth": [6, 10, 14, None],
     "rf__min_samples_leaf": [1, 3, 5],
 }
+
+
+def _proba_3(clf, Z):
+    """Probabilidades (n, 3) de [Reducir, Mantener, Reforzar] aunque el
+    entrenamiento no tenga las tres clases (columna en 0)."""
+    p = np.asarray(clf.predict_proba(Z), float)
+    clases = list(getattr(clf, "classes_", [0, 1, 2]))
+    out = np.zeros((len(p), 3))
+    for j, k in enumerate(clases):
+        out[:, int(k)] = p[:, j]
+    return out
 
 
 def _prob_vende(clf, Z):
@@ -194,6 +214,15 @@ class SalesForecastModel:
                           totales ni prob_venta. Con False la salida es la de
                           antes del paso.
     nivel_servicio      : nivel de servicio del stock sugerido (default 0,70).
+    accion_unica        : True por defecto (produccion). Tras
+                          agregar_stock_sugerido(), agregar_accion() deja una
+                          sola accion por producto (Comprar más, Mantener, No
+                          reponer este mes, Revisar o Por promedio; ver
+                          ventas_forecast.accion), la venta esperada
+                          (prob_venta x monto si se vende), el monto que se
+                          muestra segun la accion y, si la validacion interna
+                          lo confirma, el stock por accion. Requiere la
+                          probabilidad de venta. Con False no hace nada.
     """
 
     def __init__(
@@ -223,6 +252,7 @@ class SalesForecastModel:
         nivel_servicio=0.70,
         datos=None,
         grupos_mapa=None,
+        accion_unica=True,
     ):
         if filepath is None and datos is None:
             raise ValueError("Indique filepath (CSV) o datos (DataFrame)")
@@ -254,6 +284,17 @@ class SalesForecastModel:
         self.grupos_path = Path(grupos_path) if grupos_path else DATA_RAW / "grupos_productos.csv"
         self.stock_sugerido = stock_sugerido
         self.nivel_servicio = nivel_servicio
+        self.accion_unica = accion_unica
+        # Poblados por train_classifier() / agregar_accion()
+        self.umbral_reforzar = None        # t: P(Reforzar) minima para Reforzar
+        self.regla_umbral_reforzar = None  # "precision" (>= 60 %) o "f05"
+        self._clf_validacion = None        # validacion interna del clasificador
+        self.s_baja = None                 # prob_venta bajo la cual no se repone
+        self.monto_si_vende_clave = None   # A3 / A6 / M6
+        self.monto_si_vende_criterios = None
+        self.regla_stock = None            # comparacion del stock por accion
+        self.contradicciones = None
+        self._sale_datos = None            # (d, frame, train_idx) del modelo de venta
         # Poblados por agregar_stock_sugerido()
         self.calibracion_stock = None
         self.stock_validacion = None
@@ -279,7 +320,8 @@ class SalesForecastModel:
         self.df           = None   # historial completo
         self.cleaning_summary = None  # resumen de remove_bulk_adjustments (load_and_clean)
         self.df_predict   = None   # filas del último mes (para predecir)
-        self.scaler       = RobustScaler()
+        self.scaler       = RobustScaler()   # variables base (regresor)
+        self.clf_scaler   = RobustScaler()   # variables del clasificador de 3 clases
         self.cluster_scaler = RobustScaler()  # escalador exclusivo del clustering
         self.kmeans       = None
         self.clf          = None
@@ -298,6 +340,10 @@ class SalesForecastModel:
         self.tuning_results  = None   # tabla completa de GridSearchCV (tune_classifier)
         self.best_clf_params = None   # mejores hiperparámetros encontrados
         self._features    = None
+        self._clf_features = None  # _features + sale_probability.NEW_FEATURES
+        self._X_clf       = None
+        self._X_clf_scaled = None
+        self._reg_pred    = None   # variables de regularidad del mes a predecir
         self._top_prods   = None
         self._ultimo_mes  = None
         self._mes_pred    = None
@@ -672,10 +718,21 @@ class SalesForecastModel:
         self.scaler.fit(X.loc[train_idx])
         X_scaled = self.scaler.transform(X)
 
+        # Clasificador de 3 clases: variables base + regularidad de las
+        # ventas (las del modelo de venta), buscadas por (producto, mes).
+        tabla_reg = self._tabla_regularidad()
+        reg_tr = (ac.buscar(tabla_reg, df_train[c("id")], df_train["fecha"])
+                  .set_axis(df_train.index).fillna(0))
+        X_clf = pd.concat([X, reg_tr], axis=1)
+        self._clf_features = [*self._features, *sp.NEW_FEATURES]
+        self.clf_scaler = RobustScaler().fit(X_clf.loc[train_idx])
+
         self._df_train   = df_train
         self._X          = X
         self._y          = y
         self._X_scaled   = X_scaled
+        self._X_clf      = X_clf
+        self._X_clf_scaled = self.clf_scaler.transform(X_clf)
         self._train_idx  = train_idx
         self._test_idx   = test_idx
         self._interna    = None
@@ -718,6 +775,8 @@ class SalesForecastModel:
 
         df_pred_feat.replace([np.inf, -np.inf], np.nan, inplace=True)
         self.df_predict = df_pred_feat
+        self._reg_pred = (ac.buscar(tabla_reg, df_pred_feat[c("id")], df_pred_feat["fecha"])
+                          .set_axis(df_pred_feat.index).fillna(0))
 
         excluidos = self.df[self.df["fecha"] == self._ultimo_mes][c("id")].nunique() - len(df_pred)
         print(f"[✓] Entrenamiento: {len(df_train):,} filas | "
@@ -726,6 +785,12 @@ class SalesForecastModel:
               f"{len(df_pred):,} con >={self.min_months} meses de historial")
         if excluidos > 0:
             print(f"    (excluidos {excluidos} por historial insuficiente)")
+
+    def _tabla_regularidad(self):
+        """sale_probability.NEW_FEATURES de cada (producto, mes) de self.df."""
+        c = self._c
+        d = sp.add_probability_features(self.df, c("id"), c("total_sold"), c("frequency"))
+        return d.set_index([c("id"), "fecha"])[sp.NEW_FEATURES]
 
     def _fit_kwargs(self, rows):
         """sample_weight para fit() si hay sample_weight_fn; vacio si no."""
@@ -834,14 +899,14 @@ class SalesForecastModel:
 
     # ── 5. CLASIFICADOR ───────────────────────────────────────────────────────
     def train_classifier(self):
-        X_tr = self._X_scaled[self._train_idx]
+        X_tr = self._X_clf_scaled[self._train_idx]
         y_tr = self._y.iloc[self._train_idx]
-        X_te = self._X_scaled[self._test_idx]
+        X_te = self._X_clf_scaled[self._test_idx]
         y_te = self._y.iloc[self._test_idx]
 
         self.clf = RandomForestClassifier(
             **self.clf_params,
-            class_weight="balanced", random_state=42, n_jobs=-1,
+            class_weight=CLF_CLASS_WEIGHT, random_state=42, n_jobs=-1,
         )
         self.clf.fit(X_tr, y_tr, **self._fit_kwargs(self._df_train.iloc[self._train_idx]))
 
@@ -875,6 +940,41 @@ class SalesForecastModel:
         print(f"  {'Bal. accuracy':<18}: {self.metrics['balanced_accuracy']:.2%}")
         print("\n", classification_report(y_te, pred, labels=[0, 1, 2],
               target_names=["Reducir", "Mantener", "Reforzar"], zero_division=0))
+        self._elegir_umbral_reforzar()
+
+    def _elegir_umbral_reforzar(self):
+        """t de Reforzar con la validacion interna: un clasificador con los
+        mismos hiperparametros, ajustado con el entrenamiento interno (con su
+        escalador y su KMeans), predice la validacion interna y t es el menor
+        valor con precision de Reforzar >= 60 % (ver
+        accion.elegir_umbral_reforzar). La prueba interna no participa. Guarda
+        _clf_validacion (id, fecha, y, P0..P2, target) para la accion."""
+        c = self._c
+        p = self._particion_interna()
+        tr_in, va_in = p["tr"], p["va"]
+        if not tr_in or not va_in:
+            self.umbral_reforzar, self.regla_umbral_reforzar = None, None
+            self._clf_validacion = None
+            return
+        d = self._df_train
+        filas = tr_in + va_in
+        Xi = self._X_clf.loc[filas].copy()
+        Xi["cluster"] = self._cluster_interno(d.loc[filas])
+        esc = RobustScaler().fit(Xi.loc[tr_in])
+        clf_i = RandomForestClassifier(**self.clf_params, class_weight=CLF_CLASS_WEIGHT,
+                                       random_state=42, n_jobs=-1)
+        clf_i.fit(esc.transform(Xi.loc[tr_in]), self._y.loc[tr_in],
+                  **self._fit_kwargs(d.loc[tr_in]))
+        P = _proba_3(clf_i, esc.transform(Xi.loc[va_in]))
+        y = self._y.loc[va_in].to_numpy()
+        self.umbral_reforzar, self.regla_umbral_reforzar = ac.elegir_umbral_reforzar(y, P)
+        self._clf_validacion = pd.DataFrame({
+            "id": d.loc[va_in, c("id")].to_numpy(), "fecha": d.loc[va_in, "fecha"].to_numpy(),
+            "y": y, "P0": P[:, 0], "P1": P[:, 1], "P2": P[:, 2],
+            "target": d.loc[va_in, "target"].to_numpy(float),
+        }, index=va_in)
+        print(f"[✓] Umbral de Reforzar t={self.umbral_reforzar:.2f} "
+              f"({self.regla_umbral_reforzar}; validación interna, {len(va_in):,} filas)")
 
     # ── 5b. VALIDACIÓN CRUZADA TEMPORAL (splitter mensual) ───────────────────
     def _monthly_time_series_folds(self, dates, n_splits):
@@ -1158,11 +1258,12 @@ class SalesForecastModel:
 
         # Features para el mes a predecir
         X_pred = df_pred[self._features].fillna(0)
-        X_pred_scaled = self.scaler.transform(X_pred)
 
-        # Clasificación: Reducir / Mantener / Reforzar
-        pred_class = self.clf.predict(X_pred_scaled)
-        prob_matrix = self.clf.predict_proba(X_pred_scaled)
+        # Clasificación: Reducir / Mantener / Reforzar (variables base +
+        # regularidad; Reforzar solo con P(Reforzar) >= umbral_reforzar)
+        X_pred_clf = pd.concat([X_pred, self._reg_pred.loc[X_pred.index]], axis=1)
+        prob_matrix = _proba_3(self.clf, self.clf_scaler.transform(X_pred_clf))
+        pred_class = ac.decidir(prob_matrix, t=self.umbral_reforzar)
 
         # Probabilidad de la clase predicha (confianza)
         df_pred["prob_crecimiento"] = prob_matrix[:, 2]  # prob de "Reforzar"
@@ -1365,6 +1466,8 @@ class SalesForecastModel:
             "prob": p_val,
         })
 
+        self._sale_datos = (d, frame, tr)
+
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.results.to_csv(self.output_path, index=False)
         n_si = int((res["se_vendera"] == "Sí").sum())
@@ -1470,6 +1573,163 @@ class SalesForecastModel:
             print(f"    prob_venta [{cal['edges'][i]:.1f}-{cal['edges'][i + 1]:.1f}): "
                   f"n={n:,}, cuantil {self.nivel_servicio:.0%} de log1p(real) - "
                   f"log1p(pred) = {q:+.3f}")
+
+    # ── 7f. ACCIÓN ÚNICA, VENTA ESPERADA Y STOCK POR ACCIÓN ──────────────────
+    def _prob_venta_validacion_clf(self):
+        """Probabilidad de venta de las filas de la validacion interna del
+        clasificador de 3 clases sin fuga de sus objetivos: un clasificador de
+        venta (SALE_CLF_PARAMS) ajustado con las filas de entrenamiento del
+        marco de venta anteriores a la primera fila de validacion de cada
+        producto, con la variable cluster del KMeans interno."""
+        c = self._c
+        idc = c("id")
+        d, frame, s_tr = self._sale_datos
+        cv = self._clf_validacion
+        feats = self._sale_features
+        corte = cv.groupby("id")["fecha"].min()
+        f = frame.iloc[np.array(sorted(s_tr), dtype=int)]
+        lim = f[idc].map(corte)
+        f = f[(lim.isna() | (f["fecha"] < lim)).to_numpy()]
+        X = f[feats].fillna(0).copy()
+        X["cluster"] = self._cluster_interno(f)
+        clf = RandomForestClassifier(**SALE_CLF_PARAMS, random_state=42, n_jobs=-1)
+        clf.fit(X.to_numpy(), f["vende"].to_numpy())
+        q = ac.buscar(d.set_index([idc, "fecha"]), cv["id"], cv["fecha"])
+        Xq = q[feats].fillna(0).copy()
+        Xq["cluster"] = self._cluster_interno(q)
+        return _prob_vende(clf, Xq.to_numpy())
+
+    def _comparar_regla_stock(self, nivel):
+        """Stock al nivel de servicio para todos frente al stock por accion en
+        la validacion interna del stock (stock_validacion): la accion de cada
+        fila del modelo sale de la validacion interna del clasificador (P, t)
+        y de la probabilidad de venta sin fuga (s_v, s_baja)."""
+        val = self.stock_validacion
+        cv = self._clf_validacion
+        cal = self.calibracion_stock
+        pred = val["pred"].to_numpy(float)
+        stock_nivel = ss.cota_superior(pred, ss.cuantiles_para(cal, val["prob"], nivel))
+        es_mod = (val["origen"] == "modelo").to_numpy()
+        llave = cv.set_index(["id", "fecha"])
+        llave = llave[~llave.index.duplicated()]
+        q = ac.buscar(llave, val["id"], val["fecha"])
+        con = es_mod & q["P2"].notna().to_numpy()
+        P = q[["P0", "P1", "P2"]].to_numpy(float)
+        pv = q["prob_venta"].to_numpy(float)
+        dec = np.full(len(val), np.nan)
+        if con.any():
+            dec[con] = ac.decidir(P[con], pv[con], t=self.umbral_reforzar,
+                                  s=self.sale_threshold)
+        acc = ac.asignar_accion(con, dec, pv, self.sale_threshold, self.s_baja)
+        stock_regla = ac.stock_por_accion(acc, stock_nivel, pred)
+        out = ac.comparar_regla_stock(val["real"], stock_nivel, stock_regla)
+        out["acciones"] = {k: int((acc[con] == k).sum()) for k in ac.ACCIONES}
+        return out
+
+    def agregar_accion(self):
+        """
+        Una sola accion por producto (ver ventas_forecast.accion), con todo
+        lo elegido en la validacion interna del entrenamiento:
+
+        1. Coherencia con la venta: Reforzar (que ya exige P(Reforzar) >= t
+           en predict_next_month) pasa a Mantener si prob_venta < umbral de
+           venta. La columna decision queda con la decision final.
+        2. s_baja con la validacion interna del clasificador y la
+           probabilidad de venta sin fuga; accion con asignar_accion.
+        3. Monto si se vende (A3, A6 o M6, el de menor sesgo de prob x A en
+           la validacion interna del modelo de venta) y venta esperada =
+           prob_venta x A; monto_mostrado segun la accion (variante V3).
+        4. Stock por accion (Comprar más y Mantener al nivel de servicio, No
+           reponer en 0, Revisar el monto predicho) solo si en la validacion
+           interna su cobertura queda a no mas de 3 puntos de la del nivel de
+           servicio para todos y baja el stock / real (regla_stock).
+
+        Agrega accion, accion_nombre, monto_si_vende, venta_esperada,
+        monto_mostrado y monto_rango y vuelve a exportar el CSV. Requiere la
+        probabilidad de venta; con accion_unica=False no hace nada.
+        """
+        if not self.accion_unica:
+            return
+        if self.sale_threshold is None or "prob_venta" not in self.results.columns:
+            print("[!] Acción única: requiere la probabilidad de venta; se omite")
+            return
+        c = self._c
+        res = self.results.copy()
+        s_v = float(self.sale_threshold)
+        if "origen_estimacion" in res.columns:
+            es_mod = (res["origen_estimacion"] == "modelo").to_numpy()
+        else:
+            es_mod = np.ones(len(res), bool)
+        pv = res["prob_venta"].to_numpy(float)
+
+        # 1. Reforzar solo si se vendera
+        dec = np.array(res["decision"].map(ac.NOMBRE_DECISION), dtype=float)
+        with np.errstate(invalid="ignore"):
+            bloq = es_mod & (dec == ac.REFORZAR) & (pv < s_v)
+        dec[bloq] = ac.MANTENER
+        res.loc[es_mod, "decision"] = [ac.DECISION_NOMBRE[int(k)] for k in dec[es_mod]]
+
+        # 2. s_baja y accion
+        self.s_baja = 0.0
+        if self._clf_validacion is not None and self._sale_datos is not None:
+            cv = self._clf_validacion
+            cv["prob_venta"] = self._prob_venta_validacion_clf()
+            self.s_baja = ac.elegir_s_baja(cv["prob_venta"], cv["target"] <= 0, s_v)
+        acc = ac.asignar_accion(es_mod, dec, pv, s_v, self.s_baja)
+
+        # 3. Monto si se vende y venta esperada
+        est = ac.estimadores_si_vende(self.df, c("id"), c("total_sold"))
+        sv = self._sale_val
+        self.monto_si_vende_clave, self.monto_si_vende_criterios = "A3", None
+        if sv is not None and len(sv):
+            cand = ac.buscar(est, sv["id"], sv["fecha"])
+            self.monto_si_vende_clave, self.monto_si_vende_criterios = (
+                ac.elegir_monto_si_vende(sv["prob"], sv["target"],
+                                         {k: cand[k].to_numpy(float)
+                                          for k in ac.CANDIDATOS_MONTO}))
+        a = ac.buscar(est[self.monto_si_vende_clave], res[c("id")],
+                      np.repeat(np.datetime64(self._ultimo_mes, "ns"), len(res))
+                      ).to_numpy(float)
+        tiene_monto = res["ventas_predichas"].notna().to_numpy()
+        ev, mostrado, rango = ac.monto_por_accion(acc, pv, a, tiene_monto, s_v, self.s_baja)
+
+        res["accion"] = acc
+        res["accion_nombre"] = [ac.nombre(k) for k in acc]
+        res["monto_si_vende"] = np.where(tiene_monto, a, np.nan)
+        res["venta_esperada"] = ev
+        res["monto_mostrado"] = mostrado
+        res["monto_rango"] = rango
+
+        # 4. Stock por accion (si la validacion interna lo confirma)
+        self.regla_stock = None
+        if "stock_sugerido" in res.columns and self.stock_validacion is not None:
+            if self._clf_validacion is not None and len(self.stock_validacion):
+                self.regla_stock = self._comparar_regla_stock(float(self.nivel_servicio))
+            if self.regla_stock is not None and self.regla_stock["adoptada"]:
+                stock = ac.stock_por_accion(acc, res["stock_sugerido"].to_numpy(float),
+                                            res["ventas_predichas"].to_numpy(float))
+                precio = (res[c("avg_price")].to_numpy(float)
+                          if c("avg_price") in res.columns else np.full(len(res), np.nan))
+                res["stock_sugerido"] = stock
+                res["stock_sugerido_unidades"] = ss.unidades(stock, precio)
+
+        self.results = res
+        self.contradicciones = ac.contradicciones(
+            res.assign(base=res[c("total_sold")].to_numpy(float)), s_v)
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.results.to_csv(self.output_path, index=False)
+        cuenta = pd.Series(acc).value_counts()
+        print(f"[✓] Acción única: t={self.umbral_reforzar}, umbral de venta {s_v:.2f}, "
+              f"s_baja {self.s_baja:.2f}, monto si se vende {self.monto_si_vende_clave}")
+        print("    " + " | ".join(f"{ac.nombre(k)}: {int(cuenta.get(k, 0)):,}"
+                                  for k in ac.ACCIONES))
+        if self.regla_stock is not None:
+            r = self.regla_stock
+            print(f"    Stock por acción en la validación interna: cobertura "
+                  f"{r['cobertura_regla']:.1%} vs {r['cobertura_nivel']:.1%} (nivel para "
+                  f"todos), stock/real {r['stock_real_regla']:.3f} vs "
+                  f"{r['stock_real_nivel']:.3f} -> "
+                  f"{'adoptada' if r['adoptada'] else 'NO adoptada (nivel para todos)'}")
 
     # ── 7d. RESUMEN POR GRUPO DE PRODUCTO (suma de predicciones) ─────────────
     def agregar_resumen_grupo(self):
@@ -1601,6 +1861,7 @@ class SalesForecastModel:
         self.estimar_por_promedio()
         self.agregar_probabilidad_venta()
         self.agregar_stock_sugerido()
+        self.agregar_accion()
         self.agregar_resumen_grupo()
         self.clasificar_estado_productos()
         self.plot()

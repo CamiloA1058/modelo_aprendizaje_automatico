@@ -92,7 +92,7 @@ def compare_classification(model):
     (ajustado con GridSearchCV sobre los MISMOS pliegues mensuales que
     tune_classifier(), ver _monthly_time_series_folds) vs línea base de
     clase mayoritaria, sobre las MISMAS filas de entrenamiento/prueba y las
-    MISMAS features SIN escalar (model._X — a XGBoost, como a RF, no le
+    MISMAS features SIN escalar (model._X_clf, las del clasificador — a XGBoost, como a RF, no le
     afecta la escala de las features, pero se usa la versión sin escalar
     para que el pipeline de comparación no dependa del escalador ajustado
     para RF).
@@ -100,16 +100,16 @@ def compare_classification(model):
     print("\n===== COMPARACIÓN — CLASIFICADOR =====")
     inicio = time.time()
 
-    X_tr = model._X.loc[model._train_idx]
+    X_tr = model._X_clf.loc[model._train_idx]
     y_tr = model._y.loc[model._train_idx]
-    X_te = model._X.loc[model._test_idx]
+    X_te = model._X_clf.loc[model._test_idx]
     y_te = model._y.loc[model._test_idx]
     fechas_tr = model._df_train.loc[model._train_idx, "fecha"]
 
     resultados = {}
 
     # ── Random Forest (modelo de producción) ─────────────────────────────
-    pred_rf = model.clf.predict(model._X_scaled[model._test_idx])
+    pred_rf = model.clf.predict(model._X_clf_scaled[model._test_idx])
     resultados["Random Forest"] = _metricas_clasificacion(y_te, pred_rf)
 
     # ── Línea base: clase mayoritaria de entrenamiento ────────────────────
@@ -332,11 +332,11 @@ def build_report(res_clf, xgb_clf_params, n_test_clf,
         "Condiciones de equidad: los tres bloques usan EXACTAMENTE la misma "
         "partición temporal 80/20 por producto (SalesForecastModel."
         "prepare_split), las mismas filas de prueba y, cuando aplica, las "
-        "mismas features sin escalar (model._X). El clasificador XGBoost se "
+        "mismas features sin escalar (model._X; los clasificadores, model._X_clf). El clasificador XGBoost se "
         "ajustó con GridSearchCV sobre los MISMOS pliegues mensuales "
         "(_monthly_time_series_folds) que usa tune_classifier(), con "
         "sample_weight balanceado (compute_sample_weight('balanced', ...)) "
-        "para igualar class_weight='balanced' de RF. El regresor XGBoost NO "
+        "(RF usa class_weight='balanced_subsample'). El regresor XGBoost NO "
         "se ajustó (n_estimators=400, max_depth=6, learning_rate=0.05, sin "
         "búsqueda de grilla) — se indica explícitamente para que la "
         "comparación no oculte esa diferencia. Prophet/ARIMA(1,1,1) son "

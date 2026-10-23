@@ -72,7 +72,7 @@ def main():
     # ── Clasificador: predicciones de prueba y línea base de mayoría ────────
     y_tr = model._y.iloc[model._train_idx]
     y_te = model._y.iloc[model._test_idx]
-    X_te = model._X_scaled[model._test_idx]
+    X_te = model._X_clf_scaled[model._test_idx]
     pred = model.clf.predict(X_te)
 
     reporte_clf = classification_report(

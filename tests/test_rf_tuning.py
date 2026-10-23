@@ -199,7 +199,7 @@ class ClassifierMetricsTest(unittest.TestCase):
             self.assertIn(clave, self.model.metrics)
 
     def test_metrics_include_macro_f1_and_balanced_accuracy(self):
-        X_te = self.model._X_scaled[self.model._test_idx]
+        X_te = self.model._X_clf_scaled[self.model._test_idx]
         y_te = self.model._y.iloc[self.model._test_idx]
         pred = self.model.clf.predict(X_te)
 

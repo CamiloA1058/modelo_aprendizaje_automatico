@@ -125,8 +125,8 @@ class SinCambiosEnLoDemasTest(unittest.TestCase):
             Xn = on.scaler.transform(on.df_predict[on._features].fillna(0))
             # tolerancia: el orden de suma de los arboles en paralelo puede
             # mover el ultimo bit (mismo comportamiento con la opcion apagada)
-            np.testing.assert_allclose(off.clf.predict_proba(Xo),
-                                       on.clf.predict_proba(Xn), atol=1e-12)
+            np.testing.assert_allclose(off.clf.predict_proba(off._X_clf_scaled),
+                                       on.clf.predict_proba(on._X_clf_scaled), atol=1e-12)
             np.testing.assert_allclose(off.reg.predict(Xo), on.reg.predict(Xn),
                                        atol=1e-9)
 

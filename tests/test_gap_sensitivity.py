@@ -181,9 +181,10 @@ class TestModelSampleWeightHook(unittest.TestCase):
             m = self._model(tmp, fn)
             m.train_classifier()
             m.train_regressor()
-        # clasificador, regresor de producción y regresor temporal de la
-        # validación interna (que repite el procedimiento con sus pesos)
-        self.assertEqual(len(seen), 3)
+        # clasificador, clasificador temporal de la validación interna (umbral
+        # de Reforzar), regresor de producción y regresor temporal de la
+        # validación interna (cada temporal repite el procedimiento con sus pesos)
+        self.assertEqual(len(seen), 4)
         self.assertEqual(seen[0], len(m._train_idx))
 
     def test_sin_pesos_no_se_pasa_sample_weight(self):
