@@ -42,6 +42,7 @@ from sklearn.metrics import (
 )
 
 from ventas_forecast import eligibility as el
+from ventas_forecast import estado_productos as ep
 from ventas_forecast import grupos
 from ventas_forecast import improvements as im
 from ventas_forecast import sale_probability as sp
@@ -260,6 +261,7 @@ class SalesForecastModel:
         # Poblados por agregar_resumen_grupo()
         self.resumen_grupos = None
         self.mapa_grupos = None
+        self.estado_productos = None  # estado de todos los productos (clasificar_estado_productos)
         # Opcional (solo experimentos): funcion que recibe los meses actuales
         # (fecha) de las filas de entrenamiento y devuelve sus pesos de
         # muestra. None = sin pesos (comportamiento de produccion).
@@ -1497,6 +1499,41 @@ class SalesForecastModel:
             self.results, mapa, c("id"), c("total_sold"))
         print(f"[✓] Resumen por grupo: {len(self.resumen_grupos):,} grupos")
 
+    # ── 7e. ESTADO DE TODOS LOS PRODUCTOS ────────────────────────────────────
+    def _mapa_grupos_disponible(self):
+        """Catálogo de grupos ya cargado, recibido o en grupos_path; None si
+        no hay ninguno."""
+        if self.mapa_grupos is not None:
+            return self.mapa_grupos
+        if self.grupos_mapa is not None:
+            return self.grupos_mapa
+        if self.grupos_path.exists():
+            return grupos.cargar_mapa(self.grupos_path)
+        return None
+
+    def clasificar_estado_productos(self):
+        """
+        Construye self.estado_productos: una fila por producto de los datos
+        con su estado (ver ventas_forecast.estado_productos: con
+        recomendación y monto, solo recomendación, monto por promedio, venta
+        ocasional o sin ventas recientes), meses con ventas, último mes con
+        ventas, meses desde la última venta, ventas de los últimos 12 meses,
+        promedio mensual y, si tiene predicción, decisión, monto,
+        probabilidad de venta y stock sugerido tomados de self.results. Los
+        estados son disjuntos y suman todos los productos. No modifica
+        self.results, el entrenamiento ni el CSV.
+        """
+        c = self._c
+        self.estado_productos = ep.clasificar(
+            self.df, self.results, id_col=c("id"), desc_col=c("description"),
+            total_col=c("total_sold"), ultimo_mes=self._ultimo_mes,
+            min_months=self.min_months, mapa_grupos=self._mapa_grupos_disponible())
+        cuenta = self.estado_productos["estado"].value_counts()
+        print(f"[✓] Estado de los productos: {len(self.estado_productos):,} en total")
+        for clave, e in ep.ESTADOS.items():
+            print(f"    {e['nombre']}: {int(cuenta.get(clave, 0)):,}")
+        return self.estado_productos
+
     # ── 8. VISUALIZACIÓN ─────────────────────────────────────────────────────
     def plot(self, product_id=None):
         c = self._c
@@ -1565,6 +1602,7 @@ class SalesForecastModel:
         self.agregar_probabilidad_venta()
         self.agregar_stock_sugerido()
         self.agregar_resumen_grupo()
+        self.clasificar_estado_productos()
         self.plot()
         return self.results
 

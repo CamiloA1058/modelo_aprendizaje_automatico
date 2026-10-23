@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 import numpy as np
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 # ── Rutas del proyecto ────────────────────────────────────────────────────────
@@ -28,6 +28,7 @@ DEFAULT_OUTPUT = DEFAULT_PREDICTION
 # ── Importar modelo ───────────────────────────────────────────────────────────
 from ventas_forecast.model import SalesForecastModel, ETIQUETA_SIN_RECOMENDACION
 from ventas_forecast import grupos as grupos_mod
+from ventas_forecast import estado_productos as estado_mod
 from ventas_forecast import fuente_bd
 from ventas_forecast.figuras import fmt_es, pct_es
 
@@ -87,6 +88,12 @@ def _msg_ultima_venta(fecha_max, ventana):
         return (f"  → Última venta: {fecha_max:%d/%m/%Y} (su mes está incompleto y no "
                 f"se usa: es el mes que se predice)")
     return f"  → Última venta: {fecha_max:%d/%m/%Y}"
+
+
+def _msg_estados(tabla):
+    con_pred = int(tabla["estado"].isin(estado_mod.ESTADOS_CON_PREDICCION).sum())
+    return (f"  → {fmt_es(len(tabla))} productos en los datos; "
+            f"{fmt_es(con_pred)} con predicción este mes")
 
 
 def _leer_base(config_bd):
@@ -192,6 +199,10 @@ def _run_model(filepath, col_map, params, config_bd=None):
         if model.resumen_por_grupo:
             _log("✔ Sumando las predicciones por grupo de producto…")
             model.agregar_resumen_grupo()
+
+        _log("✔ Revisando el estado de todos los productos…")
+        model.clasificar_estado_productos()
+        _log(_msg_estados(model.estado_productos))
 
         _state["model"]        = model
         _state["results"]      = model.results
@@ -413,6 +424,7 @@ def api_summary():
         "metricas":    metricas,
         "top_growth":  top,
         "top_risk":    top_risk,
+        "estados":     _conteo_estados(model),
     })
 
 
@@ -503,6 +515,137 @@ def api_grupos():
         "pred_total":   float(tabla["prediccion"].sum()) if len(tabla) else 0.0,
         "data":         filas,
     })
+
+
+# ── Estado de todos los productos ─────────────────────────────────────────────
+
+def _tabla_estados():
+    """Tabla de estados del último pipeline, o None si no la hay."""
+    if _state["results"] is None or _state["model"] is None:
+        return None
+    return getattr(_state["model"], "estado_productos", None)
+
+
+def _conteo_estados(model):
+    tabla = getattr(model, "estado_productos", None)
+    if tabla is None:
+        return None
+    cuenta = tabla["estado"].value_counts()
+    return {k: int(cuenta.get(k, 0)) for k in estado_mod.ESTADOS}
+
+
+def _salida_estados(tabla, model):
+    """Columnas del modelo con los nombres que usa el dashboard."""
+    c = model._c
+    return tabla.rename(columns={c("id"): "CODIGO", c("description"): "DESCRIPCION"})
+
+
+@app.route("/api/estados")
+def api_estados():
+    """Cuántos productos y qué parte de las ventas de los últimos 12 meses hay
+    en cada estado."""
+    tabla = _tabla_estados()
+    if tabla is None:
+        return jsonify({"ok": False}), 404
+    model = _state["model"]
+    ultimo = getattr(model, "_ultimo_mes", None)
+    estados = estado_mod.resumen(tabla, model.min_months)
+    return jsonify({
+        "ok":               True,
+        "mes_predicho":     _state["mes_predicho"],
+        "ultimo_mes":       ultimo.strftime("%Y-%m") if ultimo is not None else None,
+        "min_months":       model.min_months,
+        "total_productos":  len(tabla),
+        "con_prediccion":   int(tabla["estado"].isin(estado_mod.ESTADOS_CON_PREDICCION).sum()),
+        "ventas_12m_total": float(tabla["ventas_12m"].sum()),
+        "estados":          estados,
+    })
+
+
+@app.route("/api/estados/productos")
+def api_estados_productos():
+    """Lista paginada de todos los productos con su estado."""
+    tabla = _tabla_estados()
+    if tabla is None:
+        return jsonify({"ok": False}), 404
+    out = _salida_estados(tabla, _state["model"])
+
+    q      = request.args.get("q", "").upper()
+    estado = request.args.get("estado", "")
+    grupo  = request.args.get("grupo", "")
+    sort   = request.args.get("sort", "ventas_12m")   # ventas_12m | meses_sin_venta | codigo
+    page   = int(request.args.get("page", 1))
+    size   = int(request.args.get("size", 50))
+
+    if estado:
+        out = out[out["estado"] == estado]
+    if grupo and "grupo" in out.columns:
+        out = out[out["grupo"] == grupo]
+    if q:
+        out = out[
+            out["CODIGO"].astype(str).str.upper().str.contains(q, na=False, regex=False) |
+            out["DESCRIPCION"].astype(str).str.upper().str.contains(q, na=False, regex=False)
+        ]
+
+    sort_map = {
+        "ventas_12m":      ("ventas_12m", False),
+        "meses_sin_venta": ("meses_sin_venta", False),
+        "codigo":          ("CODIGO", True),
+    }
+    col_s, asc = sort_map.get(sort, sort_map["ventas_12m"])
+    out = out.sort_values(col_s, ascending=asc, kind="stable")
+
+    total = len(out)
+    out = out.iloc[(page - 1) * size: page * size].copy()
+    out["tiene_prediccion"] = out["estado"].isin(estado_mod.ESTADOS_CON_PREDICCION)
+    filas = out.astype(object).where(out.notna(), None).to_dict(orient="records")
+    return jsonify({
+        "ok":           True,
+        "total":        total,
+        "page":         page,
+        "size":         size,
+        "mes_predicho": _state["mes_predicho"],
+        "data":         filas,
+    })
+
+
+COLUMNAS_CSV_ESTADOS = {
+    "CODIGO":                  "Código",
+    "DESCRIPCION":             "Descripción",
+    "grupo":                   "Grupo",
+    "estado_nombre":           "Estado",
+    "meses_con_venta":         "Meses con venta",
+    "ultimo_mes_venta":        "Último mes con venta",
+    "meses_sin_venta":         "Meses desde la última venta",
+    "ventas_12m":              "Ventas últimos 12 meses (COP)",
+    "promedio_mensual":        "Promedio mensual (COP)",
+    "decision":                "Decisión",
+    "ventas_predichas":        "Monto estimado (COP)",
+    "prob_venta":              "Probabilidad de venta",
+    "se_vendera":              "Se venderá",
+    "stock_sugerido":          "Stock sugerido (COP)",
+    "stock_sugerido_unidades": "Stock sugerido (unidades)",
+}
+
+
+@app.route("/api/estados/descargar")
+def api_estados_descargar():
+    """La tabla completa de estados en CSV (separador ';' y coma decimal)."""
+    tabla = _tabla_estados()
+    if tabla is None:
+        return jsonify({"ok": False}), 404
+    out = _salida_estados(tabla, _state["model"])
+    cols = [k for k in COLUMNAS_CSV_ESTADOS if k in out.columns]
+    out = out[cols].rename(columns=COLUMNAS_CSV_ESTADOS)
+    for col in ("Ventas últimos 12 meses (COP)", "Promedio mensual (COP)",
+                "Monto estimado (COP)", "Stock sugerido (COP)"):
+        if col in out.columns:
+            out[col] = out[col].astype(float).round(1)
+    texto = out.to_csv(index=False, sep=";", decimal=",")
+    nombre = f"estado_productos_{_state['mes_predicho'] or 'actual'}.csv"
+    return Response(
+        texto.encode("utf-8-sig"), mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={nombre}"})
 
 
 @app.route("/api/product/<codigo>")
